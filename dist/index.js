@@ -57,6 +57,96 @@ var renderer = {
   })
 };
 var badge_dropdown_cell_default = renderer;
+var TONE_BG = {
+  default: "#eef1f5",
+  secondary: "#e5e7eb",
+  success: "#dcfce7",
+  warning: "#fef9c3",
+  destructive: "#fee2e2",
+  info: "#dbeafe"
+};
+var TONE_FG = {
+  default: "#374151",
+  secondary: "#374151",
+  success: "#166534",
+  warning: "#854d0e",
+  destructive: "#991b1b",
+  info: "#1e40af"
+};
+var PAD = 6;
+var GAP = 6;
+var BTN_PAD = 8;
+var CHAR_W = 6.6;
+var BTN_H = 22;
+var RADIUS = 4;
+function layout(actions) {
+  const out = [];
+  let x = PAD;
+  for (const a of actions) {
+    const w = Math.ceil(a.label.length * CHAR_W) + BTN_PAD * 2;
+    out.push({ start: x, w });
+    x += w + GAP;
+  }
+  return out;
+}
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+var renderer2 = {
+  kind: GridCellKind.Custom,
+  isMatch: (c) => c.data?.kind === "actions-cell",
+  needsHover: true,
+  draw: (args, cell) => {
+    const { ctx, theme, rect } = args;
+    const { actions } = cell.data;
+    if (actions.length === 0) return true;
+    const rects = layout(actions);
+    const y = rect.y + (rect.height - BTN_H) / 2;
+    const font = `12px ${theme.fontFamily}`;
+    ctx.save();
+    ctx.font = font;
+    for (let i = 0; i < actions.length; i++) {
+      const a = actions[i];
+      const { start, w } = rects[i];
+      const x = rect.x + start;
+      ctx.globalAlpha = a.disabled ? 0.4 : 1;
+      ctx.fillStyle = TONE_BG[a.tone ?? "default"];
+      roundRect(ctx, x, y, w, BTN_H, RADIUS);
+      ctx.fill();
+      ctx.fillStyle = TONE_FG[a.tone ?? "default"];
+      ctx.fillText(a.label, x + BTN_PAD, y + BTN_H / 2 + getMiddleCenterBias(ctx, font));
+    }
+    ctx.restore();
+    return true;
+  },
+  measure: (_ctx, cell) => {
+    const rects = layout(cell.data.actions);
+    const last = rects[rects.length - 1];
+    return (last ? last.start + last.w : 0) + PAD;
+  },
+  onClick: (args) => {
+    const { cell, posX, preventDefault } = args;
+    const { actions } = cell.data;
+    const rects = layout(actions);
+    for (let i = 0; i < actions.length; i++) {
+      const { start, w } = rects[i];
+      if (posX >= start && posX <= start + w) {
+        const a = actions[i];
+        if (!a.disabled) a.onClick();
+        preventDefault();
+        break;
+      }
+    }
+    return void 0;
+  }
+};
+var actions_cell_default = renderer2;
 
 // src/data-table/types.ts
 var DEFAULT_LABELS = {
@@ -69,7 +159,8 @@ var DEFAULT_LABELS = {
   hide: "\uCEEC\uB7FC \uC228\uAE30\uAE30",
   rows: "rows",
   columns: "columns",
-  sort: "\uC815\uB82C"
+  sort: "\uC815\uB82C",
+  loading: "\uBD88\uB7EC\uC624\uB294 \uC911\u2026"
 };
 
 // src/data-table/normalizeColumn.ts
@@ -88,8 +179,88 @@ function normalizeColumn(c) {
     sortable: c.sortable ?? c.enableSorting ?? true,
     hideable: c.hideable ?? c.enableHiding ?? true,
     editable: c.editable ?? false,
-    selectOptions: c.selectOptions
+    selectOptions: c.selectOptions,
+    display: c.display,
+    actions: c.actions,
+    cellTheme: c.cellTheme,
+    // 액션 컬럼은 기본적으로 row-click 에서 제외 (버튼 클릭이 곧 행 클릭이 되면 안 됨).
+    disableRowClick: c.disableRowClick ?? Boolean(c.actions)
   };
+}
+var TONE_BG2 = {
+  default: "#eef1f5",
+  secondary: "#e5e7eb",
+  success: "#dcfce7",
+  warning: "#fef9c3",
+  destructive: "#fee2e2",
+  info: "#dbeafe"
+};
+function toneColor(tone) {
+  return TONE_BG2[tone ?? "default"];
+}
+var MONO_FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+function tagsCell(tags, colorFor, themeOverride) {
+  return {
+    kind: GridCellKind.Custom,
+    allowOverlay: false,
+    copyData: tags.join(", "),
+    themeOverride,
+    data: {
+      kind: "tags-cell",
+      tags,
+      possibleTags: tags.map((t) => ({ tag: t, color: colorFor(t) }))
+    }
+  };
+}
+function buildDisplayCell(spec, value, row, editable, themeOverride) {
+  switch (spec.kind) {
+    case "badge": {
+      const label = spec.label ? spec.label(value, row) : value == null ? "" : String(value);
+      const tone = typeof spec.tone === "function" ? spec.tone(value, row) : spec.tone;
+      const color = toneColor(tone);
+      return tagsCell(label ? [label] : [], () => color, themeOverride);
+    }
+    case "tags": {
+      const values = spec.values(row);
+      return tagsCell(
+        values,
+        (t) => toneColor(typeof spec.tone === "function" ? spec.tone(t, row) : spec.tone),
+        themeOverride
+      );
+    }
+    case "code": {
+      const str = value == null ? "" : String(value);
+      return {
+        kind: GridCellKind.Text,
+        data: str,
+        displayData: str,
+        allowOverlay: false,
+        readonly: true,
+        themeOverride: { fontFamily: MONO_FONT, bgCell: "#f3f4f6", ...themeOverride }
+      };
+    }
+    case "text": {
+      const str = value == null ? "" : String(value);
+      const color = spec.color?.(value, row);
+      return {
+        kind: GridCellKind.Text,
+        data: str,
+        displayData: str,
+        allowOverlay: editable,
+        readonly: !editable,
+        themeOverride: color ? { textDark: color, ...themeOverride } : themeOverride
+      };
+    }
+    case "toggle": {
+      return {
+        kind: GridCellKind.Boolean,
+        data: Boolean(value),
+        allowOverlay: false,
+        readonly: !editable,
+        themeOverride
+      };
+    }
+  }
 }
 function useColumnSizing(opts) {
   const { columnWidths, defaultColumnWidths, onColumnWidthsChange } = opts;
@@ -245,7 +416,7 @@ function StatusBar({ rowCount, visibleCount, totalCount, sort, titleFor, labels 
     ] })
   ] });
 }
-var CUSTOM_RENDERERS = [badge_dropdown_cell_default, ...allCells];
+var CUSTOM_RENDERERS = [badge_dropdown_cell_default, actions_cell_default, ...allCells];
 var EMPTY_TEXT = {
   kind: GridCellKind.Text,
   data: "",
@@ -270,6 +441,10 @@ function DataTable({
   onCellEdited,
   onCellContextMenu,
   onCellActivated,
+  onRowClick,
+  loading = false,
+  emptyMessage,
+  footer,
   defaultColumnWidth = 140,
   rowMarkers,
   gridSelection,
@@ -381,6 +556,19 @@ function DataTable({
       if (rec == null) return EMPTY_TEXT;
       const value = def.accessor(rec);
       const editable = def.editable;
+      const themeOverride = def.cellTheme ? def.cellTheme(value, rec) : void 0;
+      if (def.actions) {
+        return {
+          kind: GridCellKind.Custom,
+          allowOverlay: false,
+          copyData: "",
+          themeOverride,
+          data: { kind: "actions-cell", actions: def.actions(rec) }
+        };
+      }
+      if (def.display) {
+        return buildDisplayCell(def.display, value, rec, editable, themeOverride);
+      }
       const opts = selectOptionsByCol.get(def.id);
       if (opts && editable) {
         const str2 = value == null ? "" : String(value);
@@ -388,6 +576,7 @@ function DataTable({
           kind: GridCellKind.Custom,
           allowOverlay: true,
           copyData: str2,
+          themeOverride,
           data: { kind: "badge-dropdown-cell", value: str2, allowedValues: opts }
         };
       }
@@ -401,6 +590,7 @@ function DataTable({
           displayData: str2,
           allowOverlay: editable,
           readonly: !editable,
+          themeOverride,
           ...partial
         };
       }
@@ -411,7 +601,8 @@ function DataTable({
           displayData: String(value),
           allowOverlay: editable,
           readonly: !editable,
-          contentAlign: def.align ?? "right"
+          contentAlign: def.align ?? "right",
+          themeOverride
         };
       }
       const str = value == null ? "" : String(value);
@@ -421,7 +612,8 @@ function DataTable({
         displayData: str,
         allowOverlay: editable,
         readonly: !editable,
-        contentAlign: def.align
+        contentAlign: def.align,
+        themeOverride
       };
     },
     [visibleResolved, sortedData, selectOptionsByCol]
@@ -447,6 +639,18 @@ function DataTable({
       onCellActivated({ row: rec, columnId: def.id });
     },
     [onCellActivated, visibleResolved, sortedData]
+  );
+  const handleCellClicked = useCallback(
+    (cell) => {
+      if (!onRowClick) return;
+      const [c, r] = cell;
+      const def = visibleResolved[c];
+      const rec = sortedData[r];
+      if (!def || rec == null) return;
+      if (def.disableRowClick) return;
+      onRowClick(rec);
+    },
+    [onRowClick, visibleResolved, sortedData]
   );
   const handleCellContextMenu = useCallback(
     (cell, event) => {
@@ -581,35 +785,40 @@ function DataTable({
           }
         ),
         /* @__PURE__ */ jsxs("div", { className: "flex flex-1 overflow-hidden relative", children: [
-          /* @__PURE__ */ jsx("div", { className: "flex-1 overflow-hidden", children: /* @__PURE__ */ jsx(
-            DataEditor,
-            {
-              columns: gridColumns,
-              rows: sortedData.length,
-              getCellContent,
-              onColumnResize,
-              onColumnResizeEnd,
-              onColumnMoved,
-              onHeaderClicked,
-              onHeaderMenuClick: enableHeaderMenu ? onHeaderMenuClick : void 0,
-              onCellEdited: onCellEdited ? handleCellEdited : void 0,
-              onCellContextMenu: onCellContextMenu ? handleCellContextMenu : void 0,
-              onCellActivated: onCellActivated ? handleCellActivated : void 0,
-              getCellsForSelection,
-              customRenderers: CUSTOM_RENDERERS,
-              rangeSelect: "multi-rect",
-              columnSelect: "multi",
-              rowSelect: "multi",
-              rowMarkers,
-              gridSelection,
-              onGridSelectionChange,
-              smoothScrollX: true,
-              smoothScrollY: true,
-              width,
-              height,
-              theme
-            }
-          ) }),
+          /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
+            /* @__PURE__ */ jsx(
+              DataEditor,
+              {
+                columns: gridColumns,
+                rows: sortedData.length,
+                getCellContent,
+                onColumnResize,
+                onColumnResizeEnd,
+                onColumnMoved,
+                onHeaderClicked,
+                onHeaderMenuClick: enableHeaderMenu ? onHeaderMenuClick : void 0,
+                onCellEdited: onCellEdited ? handleCellEdited : void 0,
+                onCellContextMenu: onCellContextMenu ? handleCellContextMenu : void 0,
+                onCellActivated: onCellActivated ? handleCellActivated : void 0,
+                onCellClicked: onRowClick ? handleCellClicked : void 0,
+                getCellsForSelection,
+                customRenderers: CUSTOM_RENDERERS,
+                rangeSelect: "multi-rect",
+                columnSelect: "multi",
+                rowSelect: "multi",
+                rowMarkers,
+                gridSelection,
+                onGridSelectionChange,
+                smoothScrollX: true,
+                smoothScrollY: true,
+                width,
+                height,
+                theme
+              }
+            ),
+            !loading && sortedData.length === 0 && emptyMessage != null && /* @__PURE__ */ jsx("div", { style: OVERLAY_STYLE, children: emptyMessage }),
+            loading && /* @__PURE__ */ jsx("div", { style: { ...OVERLAY_STYLE, pointerEvents: "auto" }, children: /* @__PURE__ */ jsx("span", { style: { opacity: 0.6, fontSize: 13 }, children: labels.loading }) })
+          ] }),
           headerMenu && enableHeaderMenu && /* @__PURE__ */ jsx(
             HeaderMenu,
             {
@@ -625,6 +834,7 @@ function DataTable({
             }
           )
         ] }),
+        footer != null && /* @__PURE__ */ jsx("div", { className: "dt-footer", children: footer }),
         enableStatusBar && /* @__PURE__ */ jsx(
           StatusBar,
           {
@@ -640,6 +850,16 @@ function DataTable({
     }
   );
 }
+var OVERLAY_STYLE = {
+  position: "absolute",
+  inset: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(255,255,255,0.55)",
+  pointerEvents: "none",
+  zIndex: 2
+};
 var data_table_default = DataTable;
 
 export { DEFAULT_LABELS, DataTable, data_table_default as default };

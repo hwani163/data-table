@@ -20,7 +20,7 @@
 //   이 파일(index)        조립 오케스트레이터
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   DataEditor,
   GridCellKind,
@@ -34,6 +34,7 @@ import {
 import '@glideapps/glide-data-grid/dist/index.css';
 import { allCells } from '@glideapps/glide-data-grid-cells';
 import badgeDropdownRenderer from '../cells/badge-dropdown-cell';
+import actionsRenderer from '../cells/actions-cell';
 
 import {
   DEFAULT_LABELS,
@@ -43,6 +44,7 @@ import {
   type SortState,
 } from './types';
 import { normalizeColumn } from './normalizeColumn';
+import { buildDisplayCell } from './displayCell';
 import { useColumnSizing } from './features/useColumnSizing';
 import { ToolPanel } from './parts/ToolPanel';
 import { HeaderMenu, type HeaderMenuState } from './parts/HeaderMenu';
@@ -56,10 +58,13 @@ export type {
   ColumnState,
   DataTableProps,
   DataTableLabels,
+  DisplaySpec,
+  BadgeTone,
+  RowAction,
 } from './types';
 
-/** Glide custom cell renderers — 우리 badge-dropdown 우선 + 공식 extension all. */
-const CUSTOM_RENDERERS = [badgeDropdownRenderer, ...allCells];
+/** Glide custom cell renderers — 우리 badge-dropdown · actions 우선 + 공식 extension all. */
+const CUSTOM_RENDERERS = [badgeDropdownRenderer, actionsRenderer, ...allCells];
 
 const EMPTY_TEXT: GridCell = {
   kind: GridCellKind.Text,
@@ -86,6 +91,10 @@ export function DataTable<T>({
   onCellEdited,
   onCellContextMenu,
   onCellActivated,
+  onRowClick,
+  loading = false,
+  emptyMessage,
+  footer,
   defaultColumnWidth = 140,
   rowMarkers,
   gridSelection,
@@ -224,6 +233,23 @@ export function DataTable<T>({
       if (rec == null) return EMPTY_TEXT;
       const value = def.accessor(rec);
       const editable = def.editable;
+      const themeOverride = def.cellTheme ? def.cellTheme(value, rec) : undefined;
+
+      // ── actions 컬럼 (클릭 가능 버튼 묶음) ──
+      if (def.actions) {
+        return {
+          kind: GridCellKind.Custom,
+          allowOverlay: false,
+          copyData: '',
+          themeOverride,
+          data: { kind: 'actions-cell', actions: def.actions(rec) },
+        } as unknown as GridCell;
+      }
+
+      // ── 선언적 display 셀 (배지/태그/코드/색상텍스트/토글) ──
+      if (def.display) {
+        return buildDisplayCell(def.display, value, rec, editable, themeOverride);
+      }
 
       // ── select(badge dropdown) 셀 ──
       const opts = selectOptionsByCol.get(def.id);
@@ -233,6 +259,7 @@ export function DataTable<T>({
           kind: GridCellKind.Custom,
           allowOverlay: true,
           copyData: str,
+          themeOverride,
           data: { kind: 'badge-dropdown-cell', value: str, allowedValues: opts },
         } as unknown as GridCell;
       }
@@ -247,6 +274,7 @@ export function DataTable<T>({
           displayData: str,
           allowOverlay: editable,
           readonly: !editable,
+          themeOverride,
           ...partial,
         } as GridCell;
       }
@@ -259,6 +287,7 @@ export function DataTable<T>({
           allowOverlay: editable,
           readonly: !editable,
           contentAlign: def.align ?? 'right',
+          themeOverride,
         };
       }
 
@@ -270,6 +299,7 @@ export function DataTable<T>({
         allowOverlay: editable,
         readonly: !editable,
         contentAlign: def.align,
+        themeOverride,
       };
     },
     [visibleResolved, sortedData, selectOptionsByCol],
@@ -298,6 +328,19 @@ export function DataTable<T>({
       onCellActivated({ row: rec, columnId: def.id });
     },
     [onCellActivated, visibleResolved, sortedData],
+  );
+
+  const handleCellClicked = useCallback(
+    (cell: Item) => {
+      if (!onRowClick) return;
+      const [c, r] = cell;
+      const def = visibleResolved[c];
+      const rec = sortedData[r];
+      if (!def || rec == null) return;
+      if (def.disableRowClick) return; // 액션/토글 등은 행 클릭에서 제외
+      onRowClick(rec);
+    },
+    [onRowClick, visibleResolved, sortedData],
   );
 
   const handleCellContextMenu = useCallback(
@@ -454,7 +497,7 @@ export function DataTable<T>({
       )}
 
       <div className="flex flex-1 overflow-hidden relative">
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden relative">
           <DataEditor
             columns={gridColumns}
             rows={sortedData.length}
@@ -467,6 +510,7 @@ export function DataTable<T>({
             onCellEdited={onCellEdited ? handleCellEdited : undefined}
             onCellContextMenu={onCellContextMenu ? handleCellContextMenu : undefined}
             onCellActivated={onCellActivated ? handleCellActivated : undefined}
+            onCellClicked={onRowClick ? handleCellClicked : undefined}
             getCellsForSelection={getCellsForSelection}
             customRenderers={CUSTOM_RENDERERS}
             rangeSelect="multi-rect"
@@ -481,6 +525,18 @@ export function DataTable<T>({
             height={height}
             theme={theme}
           />
+
+          {/* 빈 상태 — 0행이고 로딩 아님 */}
+          {!loading && sortedData.length === 0 && emptyMessage != null && (
+            <div style={OVERLAY_STYLE}>{emptyMessage}</div>
+          )}
+
+          {/* 로딩 오버레이 */}
+          {loading && (
+            <div style={{ ...OVERLAY_STYLE, pointerEvents: 'auto' }}>
+              <span style={{ opacity: 0.6, fontSize: 13 }}>{labels.loading}</span>
+            </div>
+          )}
         </div>
 
         {headerMenu && enableHeaderMenu && (
@@ -498,6 +554,8 @@ export function DataTable<T>({
         )}
       </div>
 
+      {footer != null && <div className="dt-footer">{footer}</div>}
+
       {enableStatusBar && (
         <StatusBar
           rowCount={sortedData.length}
@@ -511,5 +569,17 @@ export function DataTable<T>({
     </div>
   );
 }
+
+/** 로딩/빈 상태 오버레이 — Tailwind 비의존 인라인 스타일(소비자 환경 무관 동작). */
+const OVERLAY_STYLE: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'rgba(255,255,255,0.55)',
+  pointerEvents: 'none',
+  zIndex: 2,
+};
 
 export default DataTable;

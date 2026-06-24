@@ -100,6 +100,64 @@ export function Example() {
 
 ---
 
+## v0.2 — 풍부한 셀 · 행 클릭 · 상태
+
+canvas 그리드에서 JSX 셀 렌더러 없이 배지/태그/버튼 등을 표현하기 위한 선언적 API.
+`column.cell: () => <JSX/>` 가 불가능한 자리를 `display` / `actions` 가 대체합니다.
+
+```tsx
+const columns: DataTableColumn<Row>[] = [
+  // 상태 배지 (값/행 기반 톤)
+  { accessorKey: 'status', header: '상태',
+    display: { kind: 'badge', tone: (v) => v === 'fail' ? 'destructive' : 'success' } },
+
+  // 다중 태그 칩
+  { id: 'keywords', header: '키워드',
+    display: { kind: 'tags', values: (r) => r.keywords } },
+
+  // 코드 칩 / 색상 텍스트
+  { accessorKey: 'path', header: '경로', display: { kind: 'code' } },
+  { accessorKey: 'grade', header: '등급',
+    display: { kind: 'text', color: (v) => v === 'A' ? '#16a34a' : '#dc2626' } },
+
+  // 토글 (불리언) — 편집 가능
+  { accessorKey: 'active', header: '활성', editable: true,
+    display: { kind: 'toggle' } },
+
+  // 셀별 테마(음수=빨강 등)
+  { accessorKey: 'amount', header: '금액', align: 'right',
+    cellTheme: (v) => ({ textDark: typeof v === 'number' && v < 0 ? '#dc2626' : undefined }) },
+
+  // 액션 컬럼 — 행마다 버튼 (자동 disableRowClick)
+  { id: 'actions', header: '',
+    actions: (row) => [
+      { label: '실행', tone: 'success', onClick: () => run(row) },
+      { label: '삭제', tone: 'destructive', disabled: row.locked, onClick: () => del(row) },
+    ] },
+];
+
+<DataTable
+  data={rows}
+  columns={columns}
+  onRowClick={(row) => openDrawer(row)}   // 액션/토글 컬럼 클릭은 제외됨
+  loading={isLoading}
+  emptyMessage={<div>결과가 없습니다</div>}
+  footer={<Pager page={page} onChange={setPage} />}
+  onCellEdited={({ row, columnId, newValue }) => save(row, columnId, newValue)}
+/>
+```
+
+### 우선순위 & canvas 제약
+
+- 셀 종류 우선순위: `actions` → `display` → select(dropdown) → `format` → 기본(number/text).
+- 톤(`BadgeTone`)은 의미색 매핑(`success`/`warning`/`destructive`/`info`/`secondary`/`default`).
+- **아이콘**: 셀 안 lucide 아이콘은 canvas 라 직접 못 그림 → 액션은 짧은 텍스트 라벨, 토글은
+  네이티브 체크박스. 아이콘이 꼭 필요한 셀은 이 라이브러리 대상이 아님.
+- **미지원(의도적)**: 확장/마스터-디테일 행, 오버플로 메뉴·확인 다이얼로그 같은 무거운 액션.
+  이런 테이블은 shadcn/TanStack 유지를 권장.
+
+---
+
 ## 공개 API
 
 | export | 종류 | 설명 |
@@ -111,6 +169,9 @@ export function Example() {
 | `SortState` / `SortDir` | type | 정렬 상태 |
 | `DataTableLabels` | type | UI 라벨 (i18n) |
 | `DEFAULT_LABELS` | const | 기본 라벨(한국어). `labels` prop으로 override |
+| `DisplaySpec<T>` | type | 선언적 표시 셀 스펙 (badge/tags/code/text/toggle) — v0.2 |
+| `BadgeTone` | type | 배지/태그/액션 색상 톤 (`default`·`success`·`warning`·`destructive`·`info`·`secondary`) — v0.2 |
+| `RowAction` | type | 액션 컬럼 버튼 (`{ label, onClick, tone?, disabled? }`) — v0.2 |
 | `NormalizedColumn<T>` | type | 정규화된 컬럼(내부 공유용) |
 
 ### 컬럼 정의 (`DataTableColumn<T>`)
@@ -140,6 +201,8 @@ native 전용: `id` · `format(value,row)→Partial<GridCell>` · `align` · `ed
 | `sort` / `onSortChange` / `sortedData` | 정렬 (controlled 또는 caller-sorted) |
 | `enableToolPanel` / `enableStatusBar` / `enableSort` / `enableHeaderMenu` | 기능 토글 |
 | `onCellEdited` / `onCellActivated` / `onCellContextMenu` | 셀 상호작용 콜백 |
+| `onRowClick` | 행 클릭 콜백 (v0.2). `disableRowClick` 컬럼은 제외 |
+| `loading` / `emptyMessage` / `footer` | 로딩 오버레이 · 빈 상태 · 하단 슬롯 (v0.2) |
 | `rowMarkers` | `'none'`(기본) / `'checkbox'` / `'number'` / `'both'` |
 | `gridSelection` / `onGridSelectionChange` | controlled 선택 상태 |
 | `height` / `width` / `className` / `theme` / `labels` | 레이아웃 · 테마 · 라벨 |

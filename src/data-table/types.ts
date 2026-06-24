@@ -4,6 +4,7 @@
 // 폴더 진입점 index.tsx 가 re-export → import 경로 불변.
 // ============================================================
 
+import type { ReactNode } from 'react';
 import type {
   CellClickedEventArgs,
   EditableGridCell,
@@ -16,6 +17,47 @@ import type {
 
 export type SortDir = 'asc' | 'desc';
 export type SortState = { id: string; dir: SortDir } | null;
+
+// ============ Display cells (declarative, canvas-friendly) ============
+
+/** 의미 톤 — 배지/태그/액션 버튼 색상 매핑 키. */
+export type BadgeTone =
+  | 'default'
+  | 'secondary'
+  | 'success'
+  | 'warning'
+  | 'destructive'
+  | 'info';
+
+/**
+ * 선언적 표시 셀 — JSX 없이 canvas 위에 배지/태그/코드/색상텍스트/토글을 렌더.
+ * 내부적으로 glide custom cell(TagsCell) · Boolean cell · Text+themeOverride 로 환원.
+ * shadcn 의 `cell: () => <JSX/>` 를 대체하는 canvas-friendly 경로. `format` 보다 우선.
+ */
+export type DisplaySpec<T> =
+  | {
+      kind: 'badge';
+      /** 배지 라벨 (미지정 시 셀 값 문자열). */
+      label?: (value: unknown, row: T) => string;
+      tone?: BadgeTone | ((value: unknown, row: T) => BadgeTone);
+    }
+  | {
+      kind: 'tags';
+      /** 행 → 표시할 태그 문자열 배열. */
+      values: (row: T) => readonly string[];
+      tone?: BadgeTone | ((tag: string, row: T) => BadgeTone);
+    }
+  | { kind: 'code' }
+  | { kind: 'text'; color?: (value: unknown, row: T) => string }
+  | { kind: 'toggle' };
+
+/** 액션 컬럼의 버튼 1개 (canvas 위 클릭 가능 영역). */
+export type RowAction = {
+  label: string;
+  onClick: () => void;
+  tone?: BadgeTone;
+  disabled?: boolean;
+};
 
 // ============ Column def ============
 
@@ -56,6 +98,21 @@ export type DataTableColumn<T> = {
    * Glide 의 badge-dropdown 커스텀 셀 사용. 외부 부수효과: `customRenderers` 자동 주입.
    */
   selectOptions?: readonly string[] | ((rows: readonly T[]) => readonly string[]);
+
+  /**
+   * 선언적 표시 셀 (배지/태그/코드/색상텍스트/토글). JSX 없이 canvas 렌더.
+   * `format` · select(dropdown) 보다 우선.
+   */
+  display?: DisplaySpec<T>;
+  /**
+   * 액션 컬럼 — 행마다 클릭 가능한 버튼 묶음. 이 컬럼은 자동으로 row-click 에서 제외됨
+   * (`disableRowClick` 기본 true).
+   */
+  actions?: (row: T) => readonly RowAction[];
+  /** 셀별 테마 override (배경/글자색/폰트 등). glide `themeOverride` 로 적용. */
+  cellTheme?: (value: unknown, row: T) => Partial<Theme>;
+  /** 이 컬럼 클릭은 `onRowClick` 을 트리거하지 않음 (액션/토글 컬럼용). */
+  disableRowClick?: boolean;
 };
 
 /** 정규화된 컬럼 — 내부 모듈 공유용. */
@@ -71,6 +128,10 @@ export type NormalizedColumn<T> = {
   hideable: boolean;
   editable: boolean;
   selectOptions: readonly string[] | ((rows: readonly T[]) => readonly string[]) | undefined;
+  display: DisplaySpec<T> | undefined;
+  actions: ((row: T) => readonly RowAction[]) | undefined;
+  cellTheme: ((value: unknown, row: T) => Partial<Theme>) | undefined;
+  disableRowClick: boolean;
 };
 
 // ============ Runtime state ============
@@ -139,6 +200,19 @@ export type DataTableProps<T> = {
    */
   onCellActivated?: (args: { row: T; columnId: string }) => void;
 
+  /**
+   * 행 클릭 콜백 — 클릭된 셀/컬럼과 무관하게 행 객체를 전달. drawer 열기·상세 이동 등.
+   * `disableRowClick: true` 인 컬럼(액션/토글 등) 클릭은 제외된다.
+   */
+  onRowClick?: (row: T) => void;
+
+  /** 로딩 오버레이 표시 (그리드 위에 반투명 레이어). */
+  loading?: boolean;
+  /** 데이터가 0행이고 `loading` 이 아닐 때 그리드 위에 표시할 내용. */
+  emptyMessage?: ReactNode;
+  /** 그리드 하단(상태바 위) footer 슬롯 — 페이저·요약 등 임의 React. */
+  footer?: ReactNode;
+
   defaultColumnWidth?: number;
 
   /**
@@ -175,6 +249,7 @@ export type DataTableLabels = {
   rows: string;
   columns: string;
   sort: string;
+  loading: string;
 };
 
 export const DEFAULT_LABELS: DataTableLabels = {
@@ -188,4 +263,5 @@ export const DEFAULT_LABELS: DataTableLabels = {
   rows: 'rows',
   columns: 'columns',
   sort: '정렬',
+  loading: '불러오는 중…',
 };

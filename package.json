@@ -1,6 +1,6 @@
 {
   "name": "@hwani163/data-table",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AG-Grid Lite — a feature layer (sorting, column sizing, show/hide, tool panel, status bar, header menu, badge-dropdown cells) on top of @glideapps/glide-data-grid for React.",
   "keywords": [
     "react",

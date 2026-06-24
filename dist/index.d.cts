@@ -1,11 +1,44 @@
 import * as react from 'react';
-import { GridCell, EditableGridCell, CellClickedEventArgs, GridSelection, Theme } from '@glideapps/glide-data-grid';
+import { ReactNode } from 'react';
+import { GridCell, Theme, EditableGridCell, CellClickedEventArgs, GridSelection } from '@glideapps/glide-data-grid';
 
 type SortDir = 'asc' | 'desc';
 type SortState = {
     id: string;
     dir: SortDir;
 } | null;
+/** 의미 톤 — 배지/태그/액션 버튼 색상 매핑 키. */
+type BadgeTone = 'default' | 'secondary' | 'success' | 'warning' | 'destructive' | 'info';
+/**
+ * 선언적 표시 셀 — JSX 없이 canvas 위에 배지/태그/코드/색상텍스트/토글을 렌더.
+ * 내부적으로 glide custom cell(TagsCell) · Boolean cell · Text+themeOverride 로 환원.
+ * shadcn 의 `cell: () => <JSX/>` 를 대체하는 canvas-friendly 경로. `format` 보다 우선.
+ */
+type DisplaySpec<T> = {
+    kind: 'badge';
+    /** 배지 라벨 (미지정 시 셀 값 문자열). */
+    label?: (value: unknown, row: T) => string;
+    tone?: BadgeTone | ((value: unknown, row: T) => BadgeTone);
+} | {
+    kind: 'tags';
+    /** 행 → 표시할 태그 문자열 배열. */
+    values: (row: T) => readonly string[];
+    tone?: BadgeTone | ((tag: string, row: T) => BadgeTone);
+} | {
+    kind: 'code';
+} | {
+    kind: 'text';
+    color?: (value: unknown, row: T) => string;
+} | {
+    kind: 'toggle';
+};
+/** 액션 컬럼의 버튼 1개 (canvas 위 클릭 가능 영역). */
+type RowAction = {
+    label: string;
+    onClick: () => void;
+    tone?: BadgeTone;
+    disabled?: boolean;
+};
 /**
  * shadcn/TanStack `ColumnDef<T>` 호환 + native 확장.
  * 최소 필드: `id` 또는 `accessorKey` 중 하나는 필수.
@@ -40,6 +73,20 @@ type DataTableColumn<T> = {
      * Glide 의 badge-dropdown 커스텀 셀 사용. 외부 부수효과: `customRenderers` 자동 주입.
      */
     selectOptions?: readonly string[] | ((rows: readonly T[]) => readonly string[]);
+    /**
+     * 선언적 표시 셀 (배지/태그/코드/색상텍스트/토글). JSX 없이 canvas 렌더.
+     * `format` · select(dropdown) 보다 우선.
+     */
+    display?: DisplaySpec<T>;
+    /**
+     * 액션 컬럼 — 행마다 클릭 가능한 버튼 묶음. 이 컬럼은 자동으로 row-click 에서 제외됨
+     * (`disableRowClick` 기본 true).
+     */
+    actions?: (row: T) => readonly RowAction[];
+    /** 셀별 테마 override (배경/글자색/폰트 등). glide `themeOverride` 로 적용. */
+    cellTheme?: (value: unknown, row: T) => Partial<Theme>;
+    /** 이 컬럼 클릭은 `onRowClick` 을 트리거하지 않음 (액션/토글 컬럼용). */
+    disableRowClick?: boolean;
 };
 /** 정규화된 컬럼 — 내부 모듈 공유용. */
 type NormalizedColumn<T> = {
@@ -54,6 +101,10 @@ type NormalizedColumn<T> = {
     hideable: boolean;
     editable: boolean;
     selectOptions: readonly string[] | ((rows: readonly T[]) => readonly string[]) | undefined;
+    display: DisplaySpec<T> | undefined;
+    actions: ((row: T) => readonly RowAction[]) | undefined;
+    cellTheme: ((value: unknown, row: T) => Partial<Theme>) | undefined;
+    disableRowClick: boolean;
 };
 /**
  * 컬럼 **구조** 상태 (가시성 + 순서). 너비는 분리 채널(useColumnSizing)로 관리하므로
@@ -118,6 +169,17 @@ type DataTableProps<T> = {
         row: T;
         columnId: string;
     }) => void;
+    /**
+     * 행 클릭 콜백 — 클릭된 셀/컬럼과 무관하게 행 객체를 전달. drawer 열기·상세 이동 등.
+     * `disableRowClick: true` 인 컬럼(액션/토글 등) 클릭은 제외된다.
+     */
+    onRowClick?: (row: T) => void;
+    /** 로딩 오버레이 표시 (그리드 위에 반투명 레이어). */
+    loading?: boolean;
+    /** 데이터가 0행이고 `loading` 이 아닐 때 그리드 위에 표시할 내용. */
+    emptyMessage?: ReactNode;
+    /** 그리드 하단(상태바 위) footer 슬롯 — 페이저·요약 등 임의 React. */
+    footer?: ReactNode;
     defaultColumnWidth?: number;
     /**
      * Glide 기본 row marker (체크박스/번호) 컬럼. 기본 `'none'`.
@@ -148,9 +210,10 @@ type DataTableLabels = {
     rows: string;
     columns: string;
     sort: string;
+    loading: string;
 };
 declare const DEFAULT_LABELS: DataTableLabels;
 
-declare function DataTable<T>({ data, columns: rawColumns, columnState: controlledState, onColumnStateChange, columnWidths, defaultColumnWidths, onColumnWidthsChange, sort: controlledSort, onSortChange, sortedData: externalSortedData, enableToolPanel, enableStatusBar, enableSort, enableHeaderMenu, onCellEdited, onCellContextMenu, onCellActivated, defaultColumnWidth, rowMarkers, gridSelection, onGridSelectionChange, className, height, width, theme, labels: labelOverrides, }: DataTableProps<T>): react.JSX.Element;
+declare function DataTable<T>({ data, columns: rawColumns, columnState: controlledState, onColumnStateChange, columnWidths, defaultColumnWidths, onColumnWidthsChange, sort: controlledSort, onSortChange, sortedData: externalSortedData, enableToolPanel, enableStatusBar, enableSort, enableHeaderMenu, onCellEdited, onCellContextMenu, onCellActivated, onRowClick, loading, emptyMessage, footer, defaultColumnWidth, rowMarkers, gridSelection, onGridSelectionChange, className, height, width, theme, labels: labelOverrides, }: DataTableProps<T>): react.JSX.Element;
 
-export { type ColumnState, DEFAULT_LABELS, DataTable, type DataTableColumn, type DataTableLabels, type DataTableProps, type NormalizedColumn, type SortDir, type SortState, DataTable as default };
+export { type BadgeTone, type ColumnState, DEFAULT_LABELS, DataTable, type DataTableColumn, type DataTableLabels, type DataTableProps, type DisplaySpec, type NormalizedColumn, type RowAction, type SortDir, type SortState, DataTable as default };
