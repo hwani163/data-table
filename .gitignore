@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.DS_Store
+coverage/
+*.tsbuildinfo
+.omc/
+
+# dist/ 는 커밋합니다 — git-URL install(github:hwani163/data-table) 시
+# 별도 빌드 단계 없이 바로 import 가능하게 하기 위함.

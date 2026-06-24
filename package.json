@@ -1,0 +1,64 @@
+{
+  "name": "@hwani163/data-table",
+  "version": "0.1.0",
+  "description": "AG-Grid Lite — a feature layer (sorting, column sizing, show/hide, tool panel, status bar, header menu, badge-dropdown cells) on top of @glideapps/glide-data-grid for React.",
+  "keywords": [
+    "react",
+    "data-grid",
+    "data-table",
+    "glide-data-grid",
+    "table",
+    "grid",
+    "ag-grid"
+  ],
+  "license": "MIT",
+  "author": "원석환 <shwon@smtown.com>",
+  "homepage": "https://github.com/hwani163/data-table#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hwani163/data-table.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hwani163/data-table/issues"
+  },
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
+  },
+  "peerDependencies": {
+    "@glideapps/glide-data-grid": "^6.0.0",
+    "@glideapps/glide-data-grid-cells": "^6.0.0",
+    "lucide-react": ">=1.0.0",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@glideapps/glide-data-grid": "^6.0.3",
+    "@glideapps/glide-data-grid-cells": "^6.0.3",
+    "@types/react": "^19.0.0",
+    "lucide-react": "^1.9.0",
+    "react": "^19.2.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}
