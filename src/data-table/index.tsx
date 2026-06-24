@@ -21,6 +21,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import {
   DataEditor,
   GridCellKind,
@@ -34,7 +35,9 @@ import {
 import '@glideapps/glide-data-grid/dist/index.css';
 import { allCells } from '@glideapps/glide-data-grid-cells';
 import badgeDropdownRenderer from '../cells/badge-dropdown-cell';
-import actionsRenderer from '../cells/actions-cell';
+import actionsRenderer, { type ActionAnchor, type ActionButton } from '../cells/actions-cell';
+import toggleRenderer from '../cells/toggle-cell';
+import statusRenderer from '../cells/status-cell';
 
 import {
   DEFAULT_LABELS,
@@ -44,7 +47,8 @@ import {
   type SortState,
 } from './types';
 import { normalizeColumn } from './normalizeColumn';
-import { buildDisplayCell } from './displayCell';
+import { buildDisplayCell, toneSolid } from './displayCell';
+import { ConfirmPopover } from './parts/ConfirmPopover';
 import { useColumnSizing } from './features/useColumnSizing';
 import { ToolPanel } from './parts/ToolPanel';
 import { HeaderMenu, type HeaderMenuState } from './parts/HeaderMenu';
@@ -61,10 +65,19 @@ export type {
   DisplaySpec,
   BadgeTone,
   RowAction,
+  ConfirmSpec,
+  ToggleSpec,
+  StatusGlyph,
 } from './types';
 
-/** Glide custom cell renderers — 우리 badge-dropdown · actions 우선 + 공식 extension all. */
-const CUSTOM_RENDERERS = [badgeDropdownRenderer, actionsRenderer, ...allCells];
+/** Glide custom cell renderers — 우리 커스텀 셀 우선 + 공식 extension all. */
+const CUSTOM_RENDERERS = [
+  badgeDropdownRenderer,
+  actionsRenderer,
+  toggleRenderer,
+  statusRenderer,
+  ...allCells,
+];
 
 const EMPTY_TEXT: GridCell = {
   kind: GridCellKind.Text,
@@ -106,6 +119,34 @@ export function DataTable<T>({
   labels: labelOverrides,
 }: DataTableProps<T>) {
   const labels = useMemo(() => ({ ...DEFAULT_LABELS, ...labelOverrides }), [labelOverrides]);
+
+  // ---------- 액션 confirm 팝오버 (DOM 포털) ----------
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [confirmState, setConfirmState] = useState<{
+    action: ActionButton;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const requestConfirm = useCallback((action: ActionButton, anchor: ActionAnchor) => {
+    // anchor = 클릭 버튼의 canvas 절대좌표 → 컨테이너 화면 위치를 더해 페이지 좌표로.
+    const r = containerRef.current?.getBoundingClientRect();
+    setConfirmState({
+      action,
+      x: (r?.left ?? 0) + anchor.x,
+      y: (r?.top ?? 0) + anchor.y + anchor.h + 4,
+    });
+  }, []);
+
+  const closeConfirm = useCallback(() => setConfirmState((c) => (c ? null : c)), []);
+
+  // 그리드 스크롤(onVisibleRegionChanged) / 창 리사이즈 시 팝오버 닫기
+  const onVisibleRegionChanged = useCallback(() => closeConfirm(), [closeConfirm]);
+  useEffect(() => {
+    if (!confirmState) return;
+    window.addEventListener('resize', closeConfirm);
+    return () => window.removeEventListener('resize', closeConfirm);
+  }, [confirmState, closeConfirm]);
 
   // ---------- normalize columns once per columns ref ----------
   const columns = useMemo(() => rawColumns.map(normalizeColumn), [rawColumns]);
@@ -235,18 +276,37 @@ export function DataTable<T>({
       const editable = def.editable;
       const themeOverride = def.cellTheme ? def.cellTheme(value, rec) : undefined;
 
-      // ── actions 컬럼 (클릭 가능 버튼 묶음) ──
+      // ── actions 컬럼 (클릭 가능 버튼 묶음, confirm 옵션) ──
       if (def.actions) {
         return {
           kind: GridCellKind.Custom,
           allowOverlay: false,
           copyData: '',
           themeOverride,
-          data: { kind: 'actions-cell', actions: def.actions(rec) },
+          data: { kind: 'actions-cell', actions: def.actions(rec), requestConfirm },
         } as unknown as GridCell;
       }
 
-      // ── 선언적 display 셀 (배지/태그/코드/색상텍스트/토글) ──
+      // ── toggle 스위치 컬럼 (부수효과 onChange) ──
+      if (def.toggle) {
+        const t = def.toggle;
+        const checked = t.checked(rec);
+        return {
+          kind: GridCellKind.Custom,
+          allowOverlay: false,
+          copyData: checked ? 'on' : 'off',
+          themeOverride,
+          data: {
+            kind: 'toggle-cell',
+            checked,
+            disabled: t.disabled?.(rec) ?? false,
+            busy: t.busy?.(rec) ?? false,
+            onToggle: () => t.onChange(rec, !checked),
+          },
+        } as unknown as GridCell;
+      }
+
+      // ── 선언적 display 셀 (배지/태그/코드/색상텍스트/토글/상태글리프) ──
       if (def.display) {
         return buildDisplayCell(def.display, value, rec, editable, themeOverride);
       }
@@ -302,7 +362,7 @@ export function DataTable<T>({
         themeOverride,
       };
     },
-    [visibleResolved, sortedData, selectOptionsByCol],
+    [visibleResolved, sortedData, selectOptionsByCol, requestConfirm],
   );
 
   // ---------- edit / activate / context-menu commit ----------
@@ -497,7 +557,7 @@ export function DataTable<T>({
       )}
 
       <div className="flex flex-1 overflow-hidden relative">
-        <div className="flex-1 overflow-hidden relative">
+        <div ref={containerRef} className="flex-1 overflow-hidden relative">
           <DataEditor
             columns={gridColumns}
             rows={sortedData.length}
@@ -519,6 +579,7 @@ export function DataTable<T>({
             rowMarkers={rowMarkers}
             gridSelection={gridSelection}
             onGridSelectionChange={onGridSelectionChange}
+            onVisibleRegionChanged={onVisibleRegionChanged}
             smoothScrollX
             smoothScrollY
             width={width}
@@ -566,6 +627,31 @@ export function DataTable<T>({
           labels={labels}
         />
       )}
+
+      {confirmState &&
+        createPortal(
+          (() => {
+            const c = confirmState.action.confirm;
+            const cfg = typeof c === 'string' ? { description: c } : (c ?? {});
+            return (
+              <ConfirmPopover
+                x={confirmState.x}
+                y={confirmState.y}
+                title={cfg.title}
+                description={cfg.description}
+                confirmLabel={cfg.confirmLabel ?? labels.confirm}
+                cancelLabel={cfg.cancelLabel ?? labels.cancel}
+                toneColor={toneSolid(cfg.tone)}
+                onConfirm={() => {
+                  confirmState.action.onClick();
+                  setConfirmState(null);
+                }}
+                onCancel={() => setConfirmState(null)}
+              />
+            );
+          })(),
+          document.body,
+        )}
     </div>
   );
 }

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.0
+
+핸드오프 명세(`DATA_TABLE_v0.3_IMPROVEMENT_REQUEST.md`)의 **A → B → C** 구현.
+deferred 테이블의 액션 안전 가드 · 부수효과 스위치 · 아이콘-only 상태 컬럼을 해소.
+**0.2 API 100% 호환.**
+
+### Added
+
+- **A. `RowAction.confirm`** — 액션 실행 전 DOM 확인 팝오버. `confirm: string` 또는
+  `{ title?, description?, confirmLabel?, cancelLabel?, tone? }`. 확인해야만 `onClick` 실행
+  (삭제 가드의 `<AlertDialog>` 회귀 방지). 클릭 버튼에 앵커, Esc·바깥클릭 취소, 그리드
+  스크롤/리사이즈 시 닫힘, 오픈 시 확인 버튼 포커스. `react-dom` 포털 사용.
+- **B. `column.toggle`** — 행별 부수효과 스위치. `{ checked, onChange, disabled?, busy? }`.
+  신규 canvas custom cell(track+knob, hit-test). 읽기성 `display:'toggle'`(체크박스) 와 구분.
+  자동 `disableRowClick`.
+- **C. `display:{ kind:'status' }`** — 아이콘/상태 글리프 셀. `icon → 'check'|'x'|'clock'|
+  'spinner'|'alert'|'dot'|'none'`, `tone`, 선택 `label`. lucide 대신 canvas 벡터 path 로
+  6종 글리프를 레티나 또렷하게 직접 그림(spinner 는 1차 정적 호).
+- 신규 export 타입: `ConfirmSpec` · `ToggleSpec<T>` · `StatusGlyph`. 라벨 `confirm`/`cancel` 추가.
+- `react-dom` (>=18) peerDependency 추가 (확인 팝오버 포털).
+
+### Notes
+
+- v0.3 = A+B+C → 명세상 deferred 12개 중 8개 해소(automation 4 · schedules · proxy-manager 부분
+  · survey-analyzer · automation logs/page).
+- 미구현(후속 P2~): D(master-detail) · E(트리/계층 행) · F(인라인 스타일 편집) ·
+  G(체크박스↔외부state + 행 메뉴) · H(셀 스켈레톤).
+- spinner 회전 애니메이션은 후속(주기적 invalidate 비용).
+
 ## 0.2.0
 
 JSX 없이 canvas 위에서 풍부한 셀을 표현하기 위한 선언적 API 추가. 마이그레이션

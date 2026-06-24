@@ -158,6 +158,46 @@ const columns: DataTableColumn<Row>[] = [
 
 ---
 
+## v0.3 — 확인 가드 · 스위치 · 상태 글리프
+
+```tsx
+const columns: DataTableColumn<Row>[] = [
+  // A) 액션 confirm — 확인해야만 onClick (삭제 가드)
+  { id: 'actions', header: '',
+    actions: (row) => [
+      { label: '실행', tone: 'success', onClick: () => run(row) },
+      { label: '삭제', tone: 'destructive',
+        confirm: { title: '삭제', description: '되돌릴 수 없습니다', tone: 'destructive' },
+        onClick: () => del(row) },
+      { label: '복사', confirm: '복사할까요?', onClick: () => copy(row) }, // 문자열 단축형
+    ] },
+
+  // B) toggle — 행별 부수효과 스위치 (display:'toggle' 읽기 체크박스와 다름)
+  { id: 'active', header: '활성',
+    toggle: {
+      checked: (r) => r.active,
+      onChange: (r, next) => setActive(r, next),
+      disabled: (r) => r.locked,
+      busy: (r) => r.saving,   // 진행 중 클릭 무시 + 흐리게
+    } },
+
+  // C) status — 아이콘/상태 글리프 (lucide 불가 자리)
+  { id: 'state', header: '상태',
+    display: {
+      kind: 'status',
+      icon: (_v, r) => r.ok ? 'check' : r.failed ? 'x' : 'spinner', // check·x·clock·spinner·alert·dot·none
+      tone: (_v, r) => r.failed ? 'destructive' : r.ok ? 'success' : 'info',
+      label: (_v, r) => r.statusText,  // 아이콘 우측 텍스트(선택)
+    } },
+];
+```
+
+- **확인 팝오버**: `react-dom` 포털로 클릭 버튼에 앵커. Esc·바깥클릭 취소, 그리드 스크롤/리사이즈 시 닫힘. 라벨은 `labels.confirm`/`labels.cancel`(기본 확인/취소).
+- **상태 글리프**: 6종을 canvas 벡터 path 로 직접 렌더(레티나 OK). `spinner` 는 현재 정적 호.
+- v0.2 의 "아이콘·확인 다이얼로그 미지원" 제약은 v0.3 의 `status`/`confirm` 으로 **부분 해소**됨. 여전히 미지원: 오버플로 메뉴, 마스터-디테일 펼침 행, 트리.
+
+---
+
 ## 공개 API
 
 | export | 종류 | 설명 |
@@ -171,7 +211,10 @@ const columns: DataTableColumn<Row>[] = [
 | `DEFAULT_LABELS` | const | 기본 라벨(한국어). `labels` prop으로 override |
 | `DisplaySpec<T>` | type | 선언적 표시 셀 스펙 (badge/tags/code/text/toggle) — v0.2 |
 | `BadgeTone` | type | 배지/태그/액션 색상 톤 (`default`·`success`·`warning`·`destructive`·`info`·`secondary`) — v0.2 |
-| `RowAction` | type | 액션 컬럼 버튼 (`{ label, onClick, tone?, disabled? }`) — v0.2 |
+| `RowAction` | type | 액션 컬럼 버튼 (`{ label, onClick, tone?, disabled?, confirm? }`) — v0.2/v0.3 |
+| `ConfirmSpec` | type | 액션 확인 팝오버 스펙 (`{ title?, description?, confirmLabel?, cancelLabel?, tone? }`) — v0.3 |
+| `ToggleSpec<T>` | type | 스위치 컬럼 (`{ checked, onChange, disabled?, busy? }`) — v0.3 |
+| `StatusGlyph` | type | 상태 글리프 (`'check'｜'x'｜'clock'｜'spinner'｜'alert'｜'dot'｜'none'`) — v0.3 |
 | `NormalizedColumn<T>` | type | 정규화된 컬럼(내부 공유용) |
 
 ### 컬럼 정의 (`DataTableColumn<T>`)

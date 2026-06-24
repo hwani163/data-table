@@ -1,9 +1,10 @@
-import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import { useMemo, useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { GridCellKind, getMiddleCenterBias, DataEditor } from '@glideapps/glide-data-grid';
 import '@glideapps/glide-data-grid/dist/index.css';
 import { DropdownCell, allCells } from '@glideapps/glide-data-grid-cells';
-import { GripVertical, Check, ArrowUp, ArrowDown, X, EyeOff } from 'lucide-react';
 import { jsxs, jsx, Fragment } from 'react/jsx-runtime';
+import { GripVertical, Check, ArrowUp, ArrowDown, X, EyeOff } from 'lucide-react';
 
 // src/data-table/index.tsx
 var BADGE_BG = "#eef1f5";
@@ -131,15 +132,21 @@ var renderer2 = {
     return (last ? last.start + last.w : 0) + PAD;
   },
   onClick: (args) => {
-    const { cell, posX, preventDefault } = args;
-    const { actions } = cell.data;
+    const { cell, posX, bounds, preventDefault } = args;
+    const { actions, requestConfirm } = cell.data;
     const rects = layout(actions);
     for (let i = 0; i < actions.length; i++) {
       const { start, w } = rects[i];
       if (posX >= start && posX <= start + w) {
         const a = actions[i];
-        if (!a.disabled) a.onClick();
         preventDefault();
+        if (a.disabled) break;
+        if (a.confirm && requestConfirm) {
+          const y = bounds.y + (bounds.height - BTN_H) / 2;
+          requestConfirm(a, { x: bounds.x + start, y, w, h: BTN_H });
+        } else {
+          a.onClick();
+        }
         break;
       }
     }
@@ -147,6 +154,157 @@ var renderer2 = {
   }
 };
 var actions_cell_default = renderer2;
+var TRACK_W = 34;
+var TRACK_H = 18;
+var KNOB_R = 7;
+var ON_COLOR = "#16a34a";
+var OFF_COLOR = "#cbd5e1";
+function roundRect2(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+var renderer3 = {
+  kind: GridCellKind.Custom,
+  isMatch: (c) => c.data?.kind === "toggle-cell",
+  needsHover: true,
+  draw: (args, cell) => {
+    const { ctx, theme, rect } = args;
+    const { checked, disabled, busy } = cell.data;
+    const x = rect.x + theme.cellHorizontalPadding;
+    const y = rect.y + (rect.height - TRACK_H) / 2;
+    ctx.save();
+    ctx.globalAlpha = disabled ? 0.4 : busy ? 0.6 : 1;
+    ctx.fillStyle = checked ? ON_COLOR : OFF_COLOR;
+    roundRect2(ctx, x, y, TRACK_W, TRACK_H, TRACK_H / 2);
+    ctx.fill();
+    const cx = checked ? x + TRACK_W - TRACK_H / 2 : x + TRACK_H / 2;
+    const cy = y + TRACK_H / 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, KNOB_R, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    if (busy) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = checked ? ON_COLOR : "#64748b";
+      ctx.fill();
+    }
+    ctx.restore();
+    return true;
+  },
+  measure: (_ctx, _cell, theme) => TRACK_W + theme.cellHorizontalPadding * 2,
+  onClick: (args) => {
+    const { cell, preventDefault } = args;
+    const { disabled, busy, onToggle } = cell.data;
+    if (!disabled && !busy) onToggle();
+    preventDefault();
+    return void 0;
+  }
+};
+var toggle_cell_default = renderer3;
+var S = 14;
+function drawGlyph(ctx, glyph, cx, cy, color) {
+  const h = S / 2;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1.75;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  switch (glyph) {
+    case "check": {
+      ctx.beginPath();
+      ctx.moveTo(cx - h * 0.7, cy);
+      ctx.lineTo(cx - h * 0.1, cy + h * 0.6);
+      ctx.lineTo(cx + h * 0.8, cy - h * 0.7);
+      ctx.stroke();
+      break;
+    }
+    case "x": {
+      ctx.beginPath();
+      ctx.moveTo(cx - h * 0.6, cy - h * 0.6);
+      ctx.lineTo(cx + h * 0.6, cy + h * 0.6);
+      ctx.moveTo(cx + h * 0.6, cy - h * 0.6);
+      ctx.lineTo(cx - h * 0.6, cy + h * 0.6);
+      ctx.stroke();
+      break;
+    }
+    case "clock": {
+      ctx.beginPath();
+      ctx.arc(cx, cy, h * 0.85, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx, cy - h * 0.55);
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + h * 0.45, cy + h * 0.1);
+      ctx.stroke();
+      break;
+    }
+    case "spinner": {
+      ctx.beginPath();
+      ctx.arc(cx, cy, h * 0.8, -Math.PI * 0.5, Math.PI * 0.9);
+      ctx.stroke();
+      break;
+    }
+    case "alert": {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - h * 0.85);
+      ctx.lineTo(cx + h * 0.85, cy + h * 0.7);
+      ctx.lineTo(cx - h * 0.85, cy + h * 0.7);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - h * 0.2);
+      ctx.lineTo(cx, cy + h * 0.25);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy + h * 0.55, 0.9, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case "dot": {
+      ctx.beginPath();
+      ctx.arc(cx, cy, h * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+  }
+  ctx.restore();
+}
+var renderer4 = {
+  kind: GridCellKind.Custom,
+  isMatch: (c) => c.data?.kind === "status-cell",
+  draw: (args, cell) => {
+    const { ctx, theme, rect } = args;
+    const { glyph, color, label } = cell.data;
+    const x = rect.x + theme.cellHorizontalPadding;
+    const cy = rect.y + rect.height / 2;
+    if (glyph !== "none") {
+      drawGlyph(ctx, glyph, x + S / 2, cy, color);
+    }
+    if (label) {
+      const font = `12px ${theme.fontFamily}`;
+      ctx.font = font;
+      ctx.fillStyle = theme.textDark;
+      const textX = glyph === "none" ? x : x + S + 6;
+      ctx.fillText(label, textX, cy + getMiddleCenterBias(ctx, font));
+    }
+    return true;
+  },
+  measure: (ctx, cell, theme) => {
+    const { glyph, label } = cell.data;
+    const glyphW = glyph === "none" ? 0 : S + 6;
+    const labelW = label ? ctx.measureText(label).width : 0;
+    return theme.cellHorizontalPadding * 2 + glyphW + labelW;
+  }
+};
+var status_cell_default = renderer4;
 
 // src/data-table/types.ts
 var DEFAULT_LABELS = {
@@ -160,7 +318,9 @@ var DEFAULT_LABELS = {
   rows: "rows",
   columns: "columns",
   sort: "\uC815\uB82C",
-  loading: "\uBD88\uB7EC\uC624\uB294 \uC911\u2026"
+  loading: "\uBD88\uB7EC\uC624\uB294 \uC911\u2026",
+  confirm: "\uD655\uC778",
+  cancel: "\uCDE8\uC18C"
 };
 
 // src/data-table/normalizeColumn.ts
@@ -182,9 +342,10 @@ function normalizeColumn(c) {
     selectOptions: c.selectOptions,
     display: c.display,
     actions: c.actions,
+    toggle: c.toggle,
     cellTheme: c.cellTheme,
-    // 액션 컬럼은 기본적으로 row-click 에서 제외 (버튼 클릭이 곧 행 클릭이 되면 안 됨).
-    disableRowClick: c.disableRowClick ?? Boolean(c.actions)
+    // 액션·토글 컬럼은 기본적으로 row-click 에서 제외 (버튼/스위치 클릭이 곧 행 클릭이 되면 안 됨).
+    disableRowClick: c.disableRowClick ?? Boolean(c.actions || c.toggle)
   };
 }
 var TONE_BG2 = {
@@ -197,6 +358,17 @@ var TONE_BG2 = {
 };
 function toneColor(tone) {
   return TONE_BG2[tone ?? "default"];
+}
+var TONE_SOLID = {
+  default: "#374151",
+  secondary: "#6b7280",
+  success: "#16a34a",
+  warning: "#d97706",
+  destructive: "#dc2626",
+  info: "#2563eb"
+};
+function toneSolid(tone) {
+  return TONE_SOLID[tone ?? "default"];
 }
 var MONO_FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 function tagsCell(tags, colorFor, themeOverride) {
@@ -260,7 +432,103 @@ function buildDisplayCell(spec, value, row, editable, themeOverride) {
         themeOverride
       };
     }
+    case "status": {
+      const glyph = spec.icon(value, row);
+      const tone = typeof spec.tone === "function" ? spec.tone(value, row) : spec.tone;
+      const label = spec.label?.(value, row);
+      return {
+        kind: GridCellKind.Custom,
+        allowOverlay: false,
+        copyData: label ?? glyph,
+        themeOverride,
+        data: { kind: "status-cell", glyph, color: toneSolid(tone), label }
+      };
+    }
   }
+}
+var CARD = {
+  position: "fixed",
+  zIndex: 9999,
+  minWidth: 200,
+  maxWidth: 320,
+  background: "#ffffff",
+  border: "1px solid #e5e7eb",
+  borderRadius: 8,
+  boxShadow: "0 8px 24px rgba(0,0,0,0.16)",
+  padding: 12,
+  fontSize: 13,
+  color: "#111827"
+};
+var BTN = {
+  fontSize: 12,
+  lineHeight: "20px",
+  padding: "4px 12px",
+  borderRadius: 6,
+  border: "1px solid #e5e7eb",
+  cursor: "pointer",
+  background: "#fff",
+  color: "#374151"
+};
+function ConfirmPopover({
+  x,
+  y,
+  title,
+  description,
+  confirmLabel,
+  cancelLabel,
+  toneColor: toneColor2,
+  onConfirm,
+  onCancel
+}) {
+  const ref = useRef(null);
+  const confirmBtnRef = useRef(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const margin = 8;
+    let left = x;
+    let top = y;
+    if (left + r.width > window.innerWidth - margin) left = window.innerWidth - r.width - margin;
+    if (top + r.height > window.innerHeight - margin) top = y - r.height - 24;
+    setPos({ left: Math.max(margin, left), top: Math.max(margin, top) });
+  }, [x, y]);
+  useEffect(() => {
+    confirmBtnRef.current?.focus();
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onCancel();
+    };
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("mousedown", onDown, true);
+    };
+  }, [onCancel]);
+  return /* @__PURE__ */ jsxs("div", { ref, style: { ...CARD, ...pos }, role: "dialog", "aria-modal": "true", children: [
+    title && /* @__PURE__ */ jsx("div", { style: { fontWeight: 600, marginBottom: description ? 4 : 10 }, children: title }),
+    description && /* @__PURE__ */ jsx("div", { style: { color: "#4b5563", marginBottom: 10 }, children: description }),
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8, justifyContent: "flex-end" }, children: [
+      /* @__PURE__ */ jsx("button", { type: "button", style: BTN, onClick: onCancel, children: cancelLabel }),
+      /* @__PURE__ */ jsx(
+        "button",
+        {
+          type: "button",
+          ref: confirmBtnRef,
+          style: { ...BTN, background: toneColor2, borderColor: toneColor2, color: "#fff" },
+          onClick: onConfirm,
+          children: confirmLabel
+        }
+      )
+    ] })
+  ] });
 }
 function useColumnSizing(opts) {
   const { columnWidths, defaultColumnWidths, onColumnWidthsChange } = opts;
@@ -416,7 +684,13 @@ function StatusBar({ rowCount, visibleCount, totalCount, sort, titleFor, labels 
     ] })
   ] });
 }
-var CUSTOM_RENDERERS = [badge_dropdown_cell_default, actions_cell_default, ...allCells];
+var CUSTOM_RENDERERS = [
+  badge_dropdown_cell_default,
+  actions_cell_default,
+  toggle_cell_default,
+  status_cell_default,
+  ...allCells
+];
 var EMPTY_TEXT = {
   kind: GridCellKind.Text,
   data: "",
@@ -456,6 +730,23 @@ function DataTable({
   labels: labelOverrides
 }) {
   const labels = useMemo(() => ({ ...DEFAULT_LABELS, ...labelOverrides }), [labelOverrides]);
+  const containerRef = useRef(null);
+  const [confirmState, setConfirmState] = useState(null);
+  const requestConfirm = useCallback((action, anchor) => {
+    const r = containerRef.current?.getBoundingClientRect();
+    setConfirmState({
+      action,
+      x: (r?.left ?? 0) + anchor.x,
+      y: (r?.top ?? 0) + anchor.y + anchor.h + 4
+    });
+  }, []);
+  const closeConfirm = useCallback(() => setConfirmState((c) => c ? null : c), []);
+  const onVisibleRegionChanged = useCallback(() => closeConfirm(), [closeConfirm]);
+  useEffect(() => {
+    if (!confirmState) return;
+    window.addEventListener("resize", closeConfirm);
+    return () => window.removeEventListener("resize", closeConfirm);
+  }, [confirmState, closeConfirm]);
   const columns = useMemo(() => rawColumns.map(normalizeColumn), [rawColumns]);
   const defById = useMemo(() => {
     const m = /* @__PURE__ */ new Map();
@@ -563,7 +854,24 @@ function DataTable({
           allowOverlay: false,
           copyData: "",
           themeOverride,
-          data: { kind: "actions-cell", actions: def.actions(rec) }
+          data: { kind: "actions-cell", actions: def.actions(rec), requestConfirm }
+        };
+      }
+      if (def.toggle) {
+        const t = def.toggle;
+        const checked = t.checked(rec);
+        return {
+          kind: GridCellKind.Custom,
+          allowOverlay: false,
+          copyData: checked ? "on" : "off",
+          themeOverride,
+          data: {
+            kind: "toggle-cell",
+            checked,
+            disabled: t.disabled?.(rec) ?? false,
+            busy: t.busy?.(rec) ?? false,
+            onToggle: () => t.onChange(rec, !checked)
+          }
         };
       }
       if (def.display) {
@@ -616,7 +924,7 @@ function DataTable({
         themeOverride
       };
     },
-    [visibleResolved, sortedData, selectOptionsByCol]
+    [visibleResolved, sortedData, selectOptionsByCol, requestConfirm]
   );
   const handleCellEdited = useCallback(
     (cell, newValue) => {
@@ -785,7 +1093,7 @@ function DataTable({
           }
         ),
         /* @__PURE__ */ jsxs("div", { className: "flex flex-1 overflow-hidden relative", children: [
-          /* @__PURE__ */ jsxs("div", { className: "flex-1 overflow-hidden relative", children: [
+          /* @__PURE__ */ jsxs("div", { ref: containerRef, className: "flex-1 overflow-hidden relative", children: [
             /* @__PURE__ */ jsx(
               DataEditor,
               {
@@ -809,6 +1117,7 @@ function DataTable({
                 rowMarkers,
                 gridSelection,
                 onGridSelectionChange,
+                onVisibleRegionChanged,
                 smoothScrollX: true,
                 smoothScrollY: true,
                 width,
@@ -845,6 +1154,30 @@ function DataTable({
             titleFor,
             labels
           }
+        ),
+        confirmState && createPortal(
+          (() => {
+            const c = confirmState.action.confirm;
+            const cfg = typeof c === "string" ? { description: c } : c ?? {};
+            return /* @__PURE__ */ jsx(
+              ConfirmPopover,
+              {
+                x: confirmState.x,
+                y: confirmState.y,
+                title: cfg.title,
+                description: cfg.description,
+                confirmLabel: cfg.confirmLabel ?? labels.confirm,
+                cancelLabel: cfg.cancelLabel ?? labels.cancel,
+                toneColor: toneSolid(cfg.tone),
+                onConfirm: () => {
+                  confirmState.action.onClick();
+                  setConfirmState(null);
+                },
+                onCancel: () => setConfirmState(null)
+              }
+            );
+          })(),
+          document.body
         )
       ]
     }

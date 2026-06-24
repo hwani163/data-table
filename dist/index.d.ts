@@ -14,6 +14,8 @@ type BadgeTone = 'default' | 'secondary' | 'success' | 'warning' | 'destructive'
  * 내부적으로 glide custom cell(TagsCell) · Boolean cell · Text+themeOverride 로 환원.
  * shadcn 의 `cell: () => <JSX/>` 를 대체하는 canvas-friendly 경로. `format` 보다 우선.
  */
+/** status 표시 셀의 글리프 종류 — canvas 벡터 path 로 직접 그림 (아이콘-only 상태 컬럼용). */
+type StatusGlyph = 'check' | 'x' | 'clock' | 'spinner' | 'alert' | 'dot' | 'none';
 type DisplaySpec<T> = {
     kind: 'badge';
     /** 배지 라벨 (미지정 시 셀 값 문자열). */
@@ -31,6 +33,21 @@ type DisplaySpec<T> = {
     color?: (value: unknown, row: T) => string;
 } | {
     kind: 'toggle';
+} | {
+    /** 아이콘/상태 글리프 셀 — lucide 대신 canvas 벡터 글리프 6종 + 선택 라벨. */
+    kind: 'status';
+    icon: (value: unknown, row: T) => StatusGlyph;
+    tone?: BadgeTone | ((value: unknown, row: T) => BadgeTone);
+    label?: (value: unknown, row: T) => string;
+};
+/** 액션 실행 전 확인 단계 스펙. 문자열만 주면 description 으로 사용. */
+type ConfirmSpec = {
+    title?: string;
+    description?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    /** 확인 버튼 톤 (예: 'destructive'). */
+    tone?: BadgeTone;
 };
 /** 액션 컬럼의 버튼 1개 (canvas 위 클릭 가능 영역). */
 type RowAction = {
@@ -38,6 +55,16 @@ type RowAction = {
     onClick: () => void;
     tone?: BadgeTone;
     disabled?: boolean;
+    /** 지정 시 onClick 전에 확인 팝오버. 확인해야만 onClick 실행 (삭제 가드 등). */
+    confirm?: string | ConfirmSpec;
+};
+/** 행별 부수효과 스위치 컬럼 설정 (읽기성 `display:'toggle'` 과 달리 onChange 콜백 보유). */
+type ToggleSpec<T> = {
+    checked: (row: T) => boolean;
+    onChange: (row: T, next: boolean) => void;
+    disabled?: (row: T) => boolean;
+    /** 진행 중 표시 + 클릭 무시. */
+    busy?: (row: T) => boolean;
 };
 /**
  * shadcn/TanStack `ColumnDef<T>` 호환 + native 확장.
@@ -83,6 +110,11 @@ type DataTableColumn<T> = {
      * (`disableRowClick` 기본 true).
      */
     actions?: (row: T) => readonly RowAction[];
+    /**
+     * 행별 부수효과 스위치 컬럼. `display:'toggle'`(읽기 전용 체크박스) 와 달리 onChange
+     * 콜백으로 즉시 반영. 자동으로 row-click 에서 제외됨.
+     */
+    toggle?: ToggleSpec<T>;
     /** 셀별 테마 override (배경/글자색/폰트 등). glide `themeOverride` 로 적용. */
     cellTheme?: (value: unknown, row: T) => Partial<Theme>;
     /** 이 컬럼 클릭은 `onRowClick` 을 트리거하지 않음 (액션/토글 컬럼용). */
@@ -103,6 +135,7 @@ type NormalizedColumn<T> = {
     selectOptions: readonly string[] | ((rows: readonly T[]) => readonly string[]) | undefined;
     display: DisplaySpec<T> | undefined;
     actions: ((row: T) => readonly RowAction[]) | undefined;
+    toggle: ToggleSpec<T> | undefined;
     cellTheme: ((value: unknown, row: T) => Partial<Theme>) | undefined;
     disableRowClick: boolean;
 };
@@ -211,9 +244,11 @@ type DataTableLabels = {
     columns: string;
     sort: string;
     loading: string;
+    confirm: string;
+    cancel: string;
 };
 declare const DEFAULT_LABELS: DataTableLabels;
 
 declare function DataTable<T>({ data, columns: rawColumns, columnState: controlledState, onColumnStateChange, columnWidths, defaultColumnWidths, onColumnWidthsChange, sort: controlledSort, onSortChange, sortedData: externalSortedData, enableToolPanel, enableStatusBar, enableSort, enableHeaderMenu, onCellEdited, onCellContextMenu, onCellActivated, onRowClick, loading, emptyMessage, footer, defaultColumnWidth, rowMarkers, gridSelection, onGridSelectionChange, className, height, width, theme, labels: labelOverrides, }: DataTableProps<T>): react.JSX.Element;
 
-export { type BadgeTone, type ColumnState, DEFAULT_LABELS, DataTable, type DataTableColumn, type DataTableLabels, type DataTableProps, type DisplaySpec, type NormalizedColumn, type RowAction, type SortDir, type SortState, DataTable as default };
+export { type BadgeTone, type ColumnState, type ConfirmSpec, DEFAULT_LABELS, DataTable, type DataTableColumn, type DataTableLabels, type DataTableProps, type DisplaySpec, type NormalizedColumn, type RowAction, type SortDir, type SortState, type StatusGlyph, type ToggleSpec, DataTable as default };

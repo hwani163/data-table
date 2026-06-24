@@ -19,16 +19,41 @@ import {
 
 type ActionTone = 'default' | 'secondary' | 'success' | 'warning' | 'destructive' | 'info';
 
+/** 확인 단계 스펙 (types.ts ConfirmSpec 와 구조 호환). */
+type ActionConfirm =
+  | string
+  | {
+      title?: string;
+      description?: string;
+      confirmLabel?: string;
+      cancelLabel?: string;
+      tone?: ActionTone;
+    };
+
+/** hit 된 액션 버튼의 셀-절대(canvas) 좌표 — 확인 팝오버 앵커. */
+export interface ActionAnchor {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
 export interface ActionButton {
   readonly label: string;
   readonly onClick: () => void;
   readonly tone?: ActionTone;
   readonly disabled?: boolean;
+  readonly confirm?: ActionConfirm;
 }
 
 interface ActionsCellProps {
   readonly kind: 'actions-cell';
   readonly actions: readonly ActionButton[];
+  /**
+   * confirm 있는 액션 클릭 시 onClick 대신 호출 — DataTable 이 DOM 확인 팝오버를 띄움.
+   * 미지정(또는 confirm 없는 액션)이면 즉시 onClick (v0.2 동작).
+   */
+  readonly requestConfirm?: (action: ActionButton, anchor: ActionAnchor) => void;
 }
 
 export type ActionsCell = CustomCell<ActionsCellProps>;
@@ -119,15 +144,22 @@ const renderer: CustomRenderer<ActionsCell> = {
     return (last ? last.start + last.w : 0) + PAD;
   },
   onClick: (args) => {
-    const { cell, posX, preventDefault } = args;
-    const { actions } = cell.data;
+    const { cell, posX, bounds, preventDefault } = args;
+    const { actions, requestConfirm } = cell.data;
     const rects = layout(actions);
     for (let i = 0; i < actions.length; i++) {
       const { start, w } = rects[i];
       if (posX >= start && posX <= start + w) {
         const a = actions[i];
-        if (!a.disabled) a.onClick();
         preventDefault();
+        if (a.disabled) break;
+        if (a.confirm && requestConfirm) {
+          // onClick 대신 확인 요청 — hit 버튼의 canvas 절대 rect 를 앵커로 전달.
+          const y = bounds.y + (bounds.height - BTN_H) / 2;
+          requestConfirm(a, { x: bounds.x + start, y, w, h: BTN_H });
+        } else {
+          a.onClick();
+        }
         break;
       }
     }

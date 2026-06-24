@@ -24,6 +24,20 @@ export function toneColor(tone: BadgeTone | undefined): string {
   return TONE_BG[tone ?? 'default'];
 }
 
+/** 톤 → 진한 단색(stroke/fill). status 글리프·확인 버튼 등 "선/채움" 용도. */
+const TONE_SOLID: Record<BadgeTone, string> = {
+  default: '#374151',
+  secondary: '#6b7280',
+  success: '#16a34a',
+  warning: '#d97706',
+  destructive: '#dc2626',
+  info: '#2563eb',
+};
+
+export function toneSolid(tone: BadgeTone | undefined): string {
+  return TONE_SOLID[tone ?? 'default'];
+}
+
 const MONO_FONT = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
 /** TagsCell GridCell 빌더 (badge = 태그 1개). */
@@ -98,6 +112,18 @@ export function buildDisplayCell<T>(
         readonly: !editable,
         themeOverride,
       };
+    }
+    case 'status': {
+      const glyph = spec.icon(value, row);
+      const tone = typeof spec.tone === 'function' ? spec.tone(value, row) : spec.tone;
+      const label = spec.label?.(value, row);
+      return {
+        kind: GridCellKind.Custom,
+        allowOverlay: false,
+        copyData: label ?? glyph,
+        themeOverride,
+        data: { kind: 'status-cell', glyph, color: toneSolid(tone), label },
+      } as unknown as GridCell;
     }
   }
 }
