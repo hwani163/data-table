@@ -21,6 +21,16 @@ type DisplaySpec<T> = {
     /** 배지 라벨 (미지정 시 셀 값 문자열). */
     label?: (value: unknown, row: T) => string;
     tone?: BadgeTone | ((value: unknown, row: T) => BadgeTone);
+    /**
+     * 지정 시 배지가 클릭 가능해진다. 클릭하면 onClick 실행 + row-click 차단(preventDefault).
+     * 기본 표시 배지(TagsCell)가 아닌 전용 클릭 배지(badge-button-cell)로 렌더된다.
+     */
+    onClick?: (value: unknown, row: T) => void;
+    /**
+     * onClick 이 있을 때 행별로 클릭 가능 여부를 결정. false 면 일반 표시 배지로 폴백(행 클릭 통과).
+     * 미지정 시 onClick 이 있으면 항상 클릭 가능.
+     */
+    clickable?: (value: unknown, row: T) => boolean;
 } | {
     kind: 'tags';
     /** 행 → 표시할 태그 문자열 배열. */
@@ -65,6 +75,30 @@ type ToggleSpec<T> = {
     disabled?: (row: T) => boolean;
     /** 진행 중 표시 + 클릭 무시. */
     busy?: (row: T) => boolean;
+};
+/** 트리(펼침/접기) 컬럼 라벨 위에 표시할 작은 배지 1개. */
+type TreeBadgeSpec = {
+    text: string;
+    tone?: BadgeTone;
+};
+/**
+ * 트리 컬럼 설정 — 들여쓰기 + chevron 토글 + 라벨(+선택 배지)을 canvas 에 그린다.
+ * glide 는 트리 내장이 없으므로 **행 평탄화는 소비 측 책임**(부모행/자식행을 flat list 로 만들어
+ * data 에 넣고, expanded 일 때만 자식행 포함). 이 컬럼은 affordance 만 담당.
+ *  - chevron 클릭 → onToggle (row-click 차단)
+ *  - 그 외 영역 클릭 → row-click 통과 (onRowClick 으로 상세 열기 등)
+ */
+type TreeSpec<T> = {
+    /** 들여쓰기 깊이 (0 = 루트). */
+    level: (row: T) => number;
+    /** chevron(펼침 토글) 표시 여부. false 면 들여쓰기만. */
+    expandable: (row: T) => boolean;
+    expanded: (row: T) => boolean;
+    onToggle: (row: T) => void;
+    /** 라벨 텍스트. */
+    label: (row: T) => string;
+    /** 라벨 앞 작은 배지들 (예: 자식 수, 태그). */
+    badges?: (row: T) => readonly TreeBadgeSpec[];
 };
 /**
  * shadcn/TanStack `ColumnDef<T>` 호환 + native 확장.
@@ -115,6 +149,11 @@ type DataTableColumn<T> = {
      * 콜백으로 즉시 반영. 자동으로 row-click 에서 제외됨.
      */
     toggle?: ToggleSpec<T>;
+    /**
+     * 트리(펼침/접기) 컬럼. 들여쓰기 + chevron 토글 + 라벨. chevron 만 토글이고 나머지 영역은
+     * row-click 통과. 행 평탄화는 소비 측 책임.
+     */
+    tree?: TreeSpec<T>;
     /** 셀별 테마 override (배경/글자색/폰트 등). glide `themeOverride` 로 적용. */
     cellTheme?: (value: unknown, row: T) => Partial<Theme>;
     /** 이 컬럼 클릭은 `onRowClick` 을 트리거하지 않음 (액션/토글 컬럼용). */
@@ -136,6 +175,7 @@ type NormalizedColumn<T> = {
     display: DisplaySpec<T> | undefined;
     actions: ((row: T) => readonly RowAction[]) | undefined;
     toggle: ToggleSpec<T> | undefined;
+    tree: TreeSpec<T> | undefined;
     cellTheme: ((value: unknown, row: T) => Partial<Theme>) | undefined;
     disableRowClick: boolean;
 };
@@ -207,12 +247,28 @@ type DataTableProps<T> = {
      * `disableRowClick: true` 인 컬럼(액션/토글 등) 클릭은 제외된다.
      */
     onRowClick?: (row: T) => void;
+    /**
+     * 행 더블클릭 콜백 — 셀 내부 버튼(단일클릭)과 상세 열기를 분리할 때 사용.
+     * glide 의 activate(더블클릭/Enter)에 매핑. `disableRowClick: true` 컬럼은 제외.
+     */
+    onRowDoubleClick?: (row: T) => void;
     /** 로딩 오버레이 표시 (그리드 위에 반투명 레이어). */
     loading?: boolean;
     /** 데이터가 0행이고 `loading` 이 아닐 때 그리드 위에 표시할 내용. */
     emptyMessage?: ReactNode;
     /** 그리드 하단(상태바 위) footer 슬롯 — 페이저·요약 등 임의 React. */
     footer?: ReactNode;
+    /**
+     * 그리드 내장 페이지네이션 (서버 페이지네이션). 지정 시 footer 아래에 Pager(이전/번호/다음)를
+     * 렌더한다. 총 페이지 수 대신 `hasMore` 로 다음 버튼 활성/말줄임을 판단.
+     */
+    pagination?: {
+        page: number;
+        hasMore: boolean;
+        onPageChange: (page: number) => void;
+        loading?: boolean;
+        maxVisible?: number;
+    };
     defaultColumnWidth?: number;
     /**
      * Glide 기본 row marker (체크박스/번호) 컬럼. 기본 `'none'`.
@@ -249,6 +305,6 @@ type DataTableLabels = {
 };
 declare const DEFAULT_LABELS: DataTableLabels;
 
-declare function DataTable<T>({ data, columns: rawColumns, columnState: controlledState, onColumnStateChange, columnWidths, defaultColumnWidths, onColumnWidthsChange, sort: controlledSort, onSortChange, sortedData: externalSortedData, enableToolPanel, enableStatusBar, enableSort, enableHeaderMenu, onCellEdited, onCellContextMenu, onCellActivated, onRowClick, loading, emptyMessage, footer, defaultColumnWidth, rowMarkers, gridSelection, onGridSelectionChange, className, height, width, theme, labels: labelOverrides, }: DataTableProps<T>): react.JSX.Element;
+declare function DataTable<T>({ data, columns: rawColumns, columnState: controlledState, onColumnStateChange, columnWidths, defaultColumnWidths, onColumnWidthsChange, sort: controlledSort, onSortChange, sortedData: externalSortedData, enableToolPanel, enableStatusBar, enableSort, enableHeaderMenu, onCellEdited, onCellContextMenu, onCellActivated, onRowClick, onRowDoubleClick, loading, emptyMessage, footer, pagination, defaultColumnWidth, rowMarkers, gridSelection, onGridSelectionChange, className, height, width, theme, labels: labelOverrides, }: DataTableProps<T>): react.JSX.Element;
 
-export { type BadgeTone, type ColumnState, type ConfirmSpec, DEFAULT_LABELS, DataTable, type DataTableColumn, type DataTableLabels, type DataTableProps, type DisplaySpec, type NormalizedColumn, type RowAction, type SortDir, type SortState, type StatusGlyph, type ToggleSpec, DataTable as default };
+export { type BadgeTone, type ColumnState, type ConfirmSpec, DEFAULT_LABELS, DataTable, type DataTableColumn, type DataTableLabels, type DataTableProps, type DisplaySpec, type NormalizedColumn, type RowAction, type SortDir, type SortState, type StatusGlyph, type ToggleSpec, type TreeBadgeSpec, type TreeSpec, DataTable as default };

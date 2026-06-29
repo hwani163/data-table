@@ -38,6 +38,7 @@ export function normalizeColumn<T>(c: DataTableColumn<T>): NormalizedColumn<T> {
     display: c.display,
     actions: c.actions,
     toggle: c.toggle,
+    tree: c.tree,
     cellTheme: c.cellTheme,
     // 액션·토글 컬럼은 기본적으로 row-click 에서 제외 (버튼/스위치 클릭이 곧 행 클릭이 되면 안 됨).
     disableRowClick: c.disableRowClick ?? Boolean(c.actions || c.toggle),

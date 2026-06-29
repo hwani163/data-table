@@ -20,7 +20,15 @@
 //   이 파일(index)        조립 오케스트레이터
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+} from 'react';
 import { createPortal } from 'react-dom';
 import {
   DataEditor,
@@ -38,6 +46,8 @@ import badgeDropdownRenderer from '../cells/badge-dropdown-cell';
 import actionsRenderer, { type ActionAnchor, type ActionButton } from '../cells/actions-cell';
 import toggleRenderer from '../cells/toggle-cell';
 import statusRenderer from '../cells/status-cell';
+import treeRenderer from '../cells/tree-cell';
+import badgeButtonRenderer from '../cells/badge-button-cell';
 
 import {
   DEFAULT_LABELS,
@@ -47,12 +57,13 @@ import {
   type SortState,
 } from './types';
 import { normalizeColumn } from './normalizeColumn';
-import { buildDisplayCell, toneSolid } from './displayCell';
+import { buildDisplayCell, toneSolid, toneColor } from './displayCell';
 import { ConfirmPopover } from './parts/ConfirmPopover';
 import { useColumnSizing } from './features/useColumnSizing';
 import { ToolPanel } from './parts/ToolPanel';
 import { HeaderMenu, type HeaderMenuState } from './parts/HeaderMenu';
 import { StatusBar } from './parts/StatusBar';
+import { Pager } from './parts/Pager';
 
 // 공개 API re-export — import 경로 `@/components/ui/data-table` 불변 보장.
 export type {
@@ -67,6 +78,8 @@ export type {
   RowAction,
   ConfirmSpec,
   ToggleSpec,
+  TreeSpec,
+  TreeBadgeSpec,
   StatusGlyph,
 } from './types';
 
@@ -76,6 +89,8 @@ const CUSTOM_RENDERERS = [
   actionsRenderer,
   toggleRenderer,
   statusRenderer,
+  treeRenderer,
+  badgeButtonRenderer,
   ...allCells,
 ];
 
@@ -85,6 +100,14 @@ const EMPTY_TEXT: GridCell = {
   displayData: '',
   allowOverlay: false,
 };
+
+// useSyncExternalStore 용 client-only 스냅샷 (구독 없음 — 값이 바뀌지 않는 정적 store).
+const subscribeNoop = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
+
+/** 행 더블클릭 판정 임계값(ms) — 같은 셀 2연타가 이 안이어야 더블클릭. */
+const DOUBLE_CLICK_MS = 400;
 
 export function DataTable<T>({
   data,
@@ -105,9 +128,11 @@ export function DataTable<T>({
   onCellContextMenu,
   onCellActivated,
   onRowClick,
+  onRowDoubleClick,
   loading = false,
   emptyMessage,
   footer,
+  pagination,
   defaultColumnWidth = 140,
   rowMarkers,
   gridSelection,
@@ -119,6 +144,11 @@ export function DataTable<T>({
   labels: labelOverrides,
 }: DataTableProps<T>) {
   const labels = useMemo(() => ({ ...DEFAULT_LABELS, ...labelOverrides }), [labelOverrides]);
+
+  // SSR/하이드레이션 안전: glide-data-grid 는 canvas + window 의존이라 서버에서 렌더 불가.
+  // useState+useEffect 대신 useSyncExternalStore 로 "클라이언트 여부"만 한 훅으로 구독(이펙트 없음).
+  // 서버 snapshot=false / 클라 snapshot=true → React 가 hydration 불일치 없이 전환.
+  const mounted = useSyncExternalStore(subscribeNoop, getClientSnapshot, getServerSnapshot);
 
   // ---------- 액션 confirm 팝오버 (DOM 포털) ----------
   const containerRef = useRef<HTMLDivElement>(null);
@@ -306,6 +336,32 @@ export function DataTable<T>({
         } as unknown as GridCell;
       }
 
+      // ── tree(펼침/접기) 컬럼 ── chevron 만 토글, 그 외 영역은 row-click 통과
+      if (def.tree) {
+        const t = def.tree;
+        const badges = (t.badges?.(rec) ?? []).map((b) => ({
+          text: b.text,
+          bg: toneColor(b.tone),
+          fg: toneSolid(b.tone),
+        }));
+        return {
+          kind: GridCellKind.Custom,
+          allowOverlay: false,
+          copyData: t.label(rec),
+          themeOverride,
+          cursor: t.expandable(rec) ? 'pointer' : undefined,
+          data: {
+            kind: 'tree-cell',
+            level: t.level(rec),
+            expandable: t.expandable(rec),
+            expanded: t.expanded(rec),
+            label: t.label(rec),
+            badges,
+            onToggle: () => t.onToggle(rec),
+          },
+        } as unknown as GridCell;
+      }
+
       // ── 선언적 display 셀 (배지/태그/코드/색상텍스트/토글/상태글리프) ──
       if (def.display) {
         return buildDisplayCell(def.display, value, rec, editable, themeOverride);
@@ -390,17 +446,31 @@ export function DataTable<T>({
     [onCellActivated, visibleResolved, sortedData],
   );
 
+  // 진짜(타임드) 더블클릭 판정 — glide onCellActivated 는 "선택된 셀 재클릭"에도 반응해
+  // 아무리 천천히 두 번 클릭해도 발화하므로 쓰지 않고, 클릭 간격을 직접 측정한다.
+  const lastClickRef = useRef<{ t: number; col: number; row: number } | null>(null);
+
   const handleCellClicked = useCallback(
     (cell: Item) => {
-      if (!onRowClick) return;
       const [c, r] = cell;
       const def = visibleResolved[c];
       const rec = sortedData[r];
-      if (!def || rec == null) return;
-      if (def.disableRowClick) return; // 액션/토글 등은 행 클릭에서 제외
-      onRowClick(rec);
+      if (!def || rec == null || def.disableRowClick) return; // 액션/토글 등은 행 클릭 제외
+
+      if (onRowClick) onRowClick(rec);
+
+      if (onRowDoubleClick) {
+        const now = Date.now();
+        const last = lastClickRef.current;
+        if (last && last.col === c && last.row === r && now - last.t < DOUBLE_CLICK_MS) {
+          lastClickRef.current = null;
+          onRowDoubleClick(rec);
+        } else {
+          lastClickRef.current = { t: now, col: c, row: r };
+        }
+      }
     },
-    [onRowClick, visibleResolved, sortedData],
+    [onRowClick, onRowDoubleClick, visibleResolved, sortedData],
   );
 
   const handleCellContextMenu = useCallback(
@@ -539,6 +609,15 @@ export function DataTable<T>({
 
   const titleFor = useCallback((id: string) => defById.get(id)?.title ?? id, [defById]);
 
+  if (!mounted) {
+    return (
+      <div
+        className={`w-full bg-background ${className}`}
+        style={{ height: typeof height === 'number' ? height : '100%' }}
+      />
+    );
+  }
+
   return (
     <div
       className={`w-full h-full bg-background text-foreground flex flex-col overflow-hidden ${className}`}
@@ -570,7 +649,7 @@ export function DataTable<T>({
             onCellEdited={onCellEdited ? handleCellEdited : undefined}
             onCellContextMenu={onCellContextMenu ? handleCellContextMenu : undefined}
             onCellActivated={onCellActivated ? handleCellActivated : undefined}
-            onCellClicked={onRowClick ? handleCellClicked : undefined}
+            onCellClicked={onRowClick || onRowDoubleClick ? handleCellClicked : undefined}
             getCellsForSelection={getCellsForSelection}
             customRenderers={CUSTOM_RENDERERS}
             rangeSelect="multi-rect"
@@ -616,6 +695,16 @@ export function DataTable<T>({
       </div>
 
       {footer != null && <div className="dt-footer">{footer}</div>}
+
+      {pagination && (
+        <Pager
+          page={pagination.page}
+          hasMore={pagination.hasMore}
+          loading={pagination.loading}
+          maxVisible={pagination.maxVisible}
+          onPageChange={pagination.onPageChange}
+        />
+      )}
 
       {enableStatusBar && (
         <StatusBar

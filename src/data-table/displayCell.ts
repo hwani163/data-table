@@ -71,6 +71,24 @@ export function buildDisplayCell<T>(
       const label = spec.label ? spec.label(value, row) : value == null ? '' : String(value);
       const tone = typeof spec.tone === 'function' ? spec.tone(value, row) : spec.tone;
       const color = toneColor(tone);
+      // 클릭 가능한 배지 → 전용 badge-button-cell (히트테스트 + onClick + row-click 차단).
+      if (spec.onClick && (spec.clickable ? spec.clickable(value, row) : true)) {
+        const onClick = spec.onClick;
+        return {
+          kind: GridCellKind.Custom,
+          allowOverlay: false,
+          copyData: label,
+          themeOverride,
+          cursor: 'pointer',
+          data: {
+            kind: 'badge-button-cell',
+            label,
+            bg: color,
+            fg: toneSolid(tone),
+            onClick: () => onClick(value, row),
+          },
+        } as unknown as GridCell;
+      }
       return tagsCell(label ? [label] : [], () => color, themeOverride);
     }
     case 'tags': {

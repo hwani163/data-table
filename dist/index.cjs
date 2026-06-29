@@ -309,6 +309,151 @@ var renderer4 = {
   }
 };
 var status_cell_default = renderer4;
+var PAD2 = 8;
+var INDENT = 16;
+var CHEVRON = 16;
+var GAP2 = 6;
+var BADGE_PAD = 6;
+var BADGE_H = 17;
+var CHAR_W2 = 6.6;
+var RADIUS2 = 8;
+var CHEVRON_COLOR = "#6b7280";
+function badgeWidth(text) {
+  return Math.ceil(text.length * CHAR_W2) + BADGE_PAD * 2;
+}
+function roundRect3(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+var renderer5 = {
+  kind: glideDataGrid.GridCellKind.Custom,
+  isMatch: (c) => c.data?.kind === "tree-cell",
+  needsHover: true,
+  draw: (args, cell) => {
+    const { ctx, theme, rect } = args;
+    const { level, expandable, expanded, label, badges } = cell.data;
+    const cy = rect.y + rect.height / 2;
+    const font = `${theme.baseFontStyle ?? "13px"} ${theme.fontFamily}`;
+    let x = rect.x + PAD2 + level * INDENT;
+    ctx.save();
+    ctx.font = font;
+    if (expandable) {
+      const cx = x + CHEVRON / 2;
+      const s = 4;
+      ctx.fillStyle = CHEVRON_COLOR;
+      ctx.beginPath();
+      if (expanded) {
+        ctx.moveTo(cx - s, cy - s / 2);
+        ctx.lineTo(cx + s, cy - s / 2);
+        ctx.lineTo(cx, cy + s);
+      } else {
+        ctx.moveTo(cx - s / 2, cy - s);
+        ctx.lineTo(cx + s, cy);
+        ctx.lineTo(cx - s / 2, cy + s);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    x += CHEVRON;
+    for (const b of badges) {
+      const w = badgeWidth(b.text);
+      ctx.fillStyle = b.bg;
+      roundRect3(ctx, x, cy - BADGE_H / 2, w, BADGE_H, RADIUS2);
+      ctx.fill();
+      ctx.fillStyle = b.fg;
+      ctx.fillText(b.text, x + BADGE_PAD, cy + glideDataGrid.getMiddleCenterBias(ctx, font));
+      x += w + GAP2;
+    }
+    ctx.fillStyle = theme.textDark;
+    const maxX = rect.x + rect.width - PAD2;
+    let text = label;
+    if (x + ctx.measureText(text).width > maxX) {
+      const ell = "\u2026";
+      while (text.length > 1 && x + ctx.measureText(text + ell).width > maxX) {
+        text = text.slice(0, -1);
+      }
+      text += ell;
+    }
+    ctx.fillText(text, x, cy + glideDataGrid.getMiddleCenterBias(ctx, font));
+    ctx.restore();
+    return true;
+  },
+  measure: (_ctx, cell) => {
+    const { level, badges, label } = cell.data;
+    let w = PAD2 + level * INDENT + CHEVRON;
+    for (const b of badges) w += badgeWidth(b.text) + GAP2;
+    w += Math.ceil(label.length * CHAR_W2) + PAD2;
+    return w;
+  },
+  onClick: (args) => {
+    const { cell, posX, preventDefault } = args;
+    const { level, expandable, onToggle } = cell.data;
+    if (!expandable) return void 0;
+    const start = PAD2 + level * INDENT;
+    if (posX >= start && posX <= start + CHEVRON) {
+      preventDefault();
+      onToggle();
+    }
+    return void 0;
+  }
+};
+var tree_cell_default = renderer5;
+var PAD3 = 6;
+var BTN_PAD2 = 8;
+var CHAR_W3 = 6.6;
+var H = 22;
+var RADIUS3 = 11;
+function pillWidth(label) {
+  return Math.ceil(label.length * CHAR_W3) + BTN_PAD2 * 2;
+}
+function roundRect4(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+var renderer6 = {
+  kind: glideDataGrid.GridCellKind.Custom,
+  isMatch: (c) => c.data?.kind === "badge-button-cell",
+  needsHover: true,
+  draw: (args, cell) => {
+    const { ctx, theme, rect } = args;
+    const { label, bg, fg } = cell.data;
+    if (!label) return true;
+    const w = pillWidth(label);
+    const x = rect.x + PAD3;
+    const y = rect.y + (rect.height - H) / 2;
+    const font = `12px ${theme.fontFamily}`;
+    ctx.save();
+    ctx.font = font;
+    ctx.fillStyle = bg;
+    roundRect4(ctx, x, y, w, H, RADIUS3);
+    ctx.fill();
+    ctx.fillStyle = fg;
+    ctx.fillText(label, x + BTN_PAD2, y + H / 2 + glideDataGrid.getMiddleCenterBias(ctx, font));
+    ctx.restore();
+    return true;
+  },
+  measure: (_ctx, cell) => pillWidth(cell.data.label) + PAD3 * 2,
+  onClick: (args) => {
+    const { cell, posX, preventDefault } = args;
+    const w = pillWidth(cell.data.label);
+    if (posX >= PAD3 && posX <= PAD3 + w) {
+      preventDefault();
+      cell.data.onClick();
+    }
+    return void 0;
+  }
+};
+var badge_button_cell_default = renderer6;
 
 // src/data-table/types.ts
 var DEFAULT_LABELS = {
@@ -347,6 +492,7 @@ function normalizeColumn(c) {
     display: c.display,
     actions: c.actions,
     toggle: c.toggle,
+    tree: c.tree,
     cellTheme: c.cellTheme,
     // 액션·토글 컬럼은 기본적으로 row-click 에서 제외 (버튼/스위치 클릭이 곧 행 클릭이 되면 안 됨).
     disableRowClick: c.disableRowClick ?? Boolean(c.actions || c.toggle)
@@ -394,6 +540,23 @@ function buildDisplayCell(spec, value, row, editable, themeOverride) {
       const label = spec.label ? spec.label(value, row) : value == null ? "" : String(value);
       const tone = typeof spec.tone === "function" ? spec.tone(value, row) : spec.tone;
       const color = toneColor(tone);
+      if (spec.onClick && (spec.clickable ? spec.clickable(value, row) : true)) {
+        const onClick = spec.onClick;
+        return {
+          kind: glideDataGrid.GridCellKind.Custom,
+          allowOverlay: false,
+          copyData: label,
+          themeOverride,
+          cursor: "pointer",
+          data: {
+            kind: "badge-button-cell",
+            label,
+            bg: color,
+            fg: toneSolid(tone),
+            onClick: () => onClick(value, row)
+          }
+        };
+      }
       return tagsCell(label ? [label] : [], () => color, themeOverride);
     }
     case "tags": {
@@ -688,11 +851,88 @@ function StatusBar({ rowCount, visibleCount, totalCount, sort, titleFor, labels 
     ] })
   ] });
 }
+function generatePages(page, hasMore, maxVisible) {
+  const last = page;
+  if (last <= maxVisible && !hasMore) {
+    return Array.from({ length: last }, (_, i) => i + 1);
+  }
+  const half = Math.floor(maxVisible / 2);
+  let start = Math.max(1, page - half);
+  let end = start + maxVisible - 1;
+  if (end > last && !hasMore) {
+    end = last;
+    start = Math.max(1, end - maxVisible + 1);
+  }
+  const pages = [];
+  const showStartEllipsis = start > 2;
+  const showEndEllipsis = hasMore || end < last - 1;
+  if (start > 1) {
+    pages.push(1);
+    if (showStartEllipsis) {
+      pages.push("ellipsis-start");
+      start++;
+    }
+  }
+  for (let i = start; i <= end; i++) {
+    if (i > 0 && (hasMore || i <= last)) pages.push(i);
+  }
+  if (showEndEllipsis) pages.push("ellipsis-end");
+  return pages;
+}
+var WRAP = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 4,
+  padding: "8px 4px"
+};
+var BTN_BASE = {
+  minWidth: 32,
+  height: 32,
+  padding: "0 8px",
+  borderRadius: 6,
+  // shorthand `border` 와 조건부 `borderColor` 를 섞으면 React 경고 → 개별 속성으로.
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "#e5e7eb",
+  background: "#fff",
+  color: "#374151",
+  fontSize: 13,
+  cursor: "pointer",
+  userSelect: "none",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center"
+};
+function btnStyle(opts) {
+  return {
+    ...BTN_BASE,
+    ...opts.active ? { background: "#111827", color: "#fff", borderColor: "#111827" } : null,
+    ...opts.disabled ? { opacity: 0.4, cursor: "not-allowed" } : null
+  };
+}
+function Pager({ page, hasMore, loading = false, onPageChange, maxVisible = 5 }) {
+  const pages = generatePages(page, hasMore, maxVisible);
+  const canPrev = page > 1;
+  const go = (p) => {
+    if (p < 1 || loading) return;
+    onPageChange(p);
+  };
+  return /* @__PURE__ */ jsxRuntime.jsxs("div", { style: { ...WRAP, ...loading ? { pointerEvents: "none", opacity: 0.5 } : null }, children: [
+    /* @__PURE__ */ jsxRuntime.jsx("button", { type: "button", style: btnStyle({ disabled: !canPrev }), disabled: !canPrev, onClick: () => go(page - 1), children: "\u2039" }),
+    pages.map(
+      (p, i) => typeof p === "number" ? /* @__PURE__ */ jsxRuntime.jsx("button", { type: "button", style: btnStyle({ active: p === page }), onClick: () => go(p), children: p }, p) : /* @__PURE__ */ jsxRuntime.jsx("span", { style: { minWidth: 24, textAlign: "center", color: "#9ca3af" }, children: "\u2026" }, `${p}-${i}`)
+    ),
+    /* @__PURE__ */ jsxRuntime.jsx("button", { type: "button", style: btnStyle({ disabled: !hasMore }), disabled: !hasMore, onClick: () => go(page + 1), children: "\u203A" })
+  ] });
+}
 var CUSTOM_RENDERERS = [
   badge_dropdown_cell_default,
   actions_cell_default,
   toggle_cell_default,
   status_cell_default,
+  tree_cell_default,
+  badge_button_cell_default,
   ...glideDataGridCells.allCells
 ];
 var EMPTY_TEXT = {
@@ -701,6 +941,11 @@ var EMPTY_TEXT = {
   displayData: "",
   allowOverlay: false
 };
+var subscribeNoop = () => () => {
+};
+var getClientSnapshot = () => true;
+var getServerSnapshot = () => false;
+var DOUBLE_CLICK_MS = 400;
 function DataTable({
   data,
   columns: rawColumns,
@@ -720,9 +965,11 @@ function DataTable({
   onCellContextMenu,
   onCellActivated,
   onRowClick,
+  onRowDoubleClick,
   loading = false,
   emptyMessage,
   footer,
+  pagination,
   defaultColumnWidth = 140,
   rowMarkers,
   gridSelection,
@@ -734,6 +981,7 @@ function DataTable({
   labels: labelOverrides
 }) {
   const labels = react.useMemo(() => ({ ...DEFAULT_LABELS, ...labelOverrides }), [labelOverrides]);
+  const mounted = react.useSyncExternalStore(subscribeNoop, getClientSnapshot, getServerSnapshot);
   const containerRef = react.useRef(null);
   const [confirmState, setConfirmState] = react.useState(null);
   const requestConfirm = react.useCallback((action, anchor) => {
@@ -878,6 +1126,30 @@ function DataTable({
           }
         };
       }
+      if (def.tree) {
+        const t = def.tree;
+        const badges = (t.badges?.(rec) ?? []).map((b) => ({
+          text: b.text,
+          bg: toneColor(b.tone),
+          fg: toneSolid(b.tone)
+        }));
+        return {
+          kind: glideDataGrid.GridCellKind.Custom,
+          allowOverlay: false,
+          copyData: t.label(rec),
+          themeOverride,
+          cursor: t.expandable(rec) ? "pointer" : void 0,
+          data: {
+            kind: "tree-cell",
+            level: t.level(rec),
+            expandable: t.expandable(rec),
+            expanded: t.expanded(rec),
+            label: t.label(rec),
+            badges,
+            onToggle: () => t.onToggle(rec)
+          }
+        };
+      }
       if (def.display) {
         return buildDisplayCell(def.display, value, rec, editable, themeOverride);
       }
@@ -952,17 +1224,26 @@ function DataTable({
     },
     [onCellActivated, visibleResolved, sortedData]
   );
+  const lastClickRef = react.useRef(null);
   const handleCellClicked = react.useCallback(
     (cell) => {
-      if (!onRowClick) return;
       const [c, r] = cell;
       const def = visibleResolved[c];
       const rec = sortedData[r];
-      if (!def || rec == null) return;
-      if (def.disableRowClick) return;
-      onRowClick(rec);
+      if (!def || rec == null || def.disableRowClick) return;
+      if (onRowClick) onRowClick(rec);
+      if (onRowDoubleClick) {
+        const now = Date.now();
+        const last = lastClickRef.current;
+        if (last && last.col === c && last.row === r && now - last.t < DOUBLE_CLICK_MS) {
+          lastClickRef.current = null;
+          onRowDoubleClick(rec);
+        } else {
+          lastClickRef.current = { t: now, col: c, row: r };
+        }
+      }
     },
-    [onRowClick, visibleResolved, sortedData]
+    [onRowClick, onRowDoubleClick, visibleResolved, sortedData]
   );
   const handleCellContextMenu = react.useCallback(
     (cell, event) => {
@@ -1078,6 +1359,15 @@ function DataTable({
     [draggedPanelId, setColumnState]
   );
   const titleFor = react.useCallback((id) => defById.get(id)?.title ?? id, [defById]);
+  if (!mounted) {
+    return /* @__PURE__ */ jsxRuntime.jsx(
+      "div",
+      {
+        className: `w-full bg-background ${className}`,
+        style: { height: typeof height === "number" ? height : "100%" }
+      }
+    );
+  }
   return /* @__PURE__ */ jsxRuntime.jsxs(
     "div",
     {
@@ -1112,7 +1402,7 @@ function DataTable({
                 onCellEdited: onCellEdited ? handleCellEdited : void 0,
                 onCellContextMenu: onCellContextMenu ? handleCellContextMenu : void 0,
                 onCellActivated: onCellActivated ? handleCellActivated : void 0,
-                onCellClicked: onRowClick ? handleCellClicked : void 0,
+                onCellClicked: onRowClick || onRowDoubleClick ? handleCellClicked : void 0,
                 getCellsForSelection,
                 customRenderers: CUSTOM_RENDERERS,
                 rangeSelect: "multi-rect",
@@ -1148,6 +1438,16 @@ function DataTable({
           )
         ] }),
         footer != null && /* @__PURE__ */ jsxRuntime.jsx("div", { className: "dt-footer", children: footer }),
+        pagination && /* @__PURE__ */ jsxRuntime.jsx(
+          Pager,
+          {
+            page: pagination.page,
+            hasMore: pagination.hasMore,
+            loading: pagination.loading,
+            maxVisible: pagination.maxVisible,
+            onPageChange: pagination.onPageChange
+          }
+        ),
         enableStatusBar && /* @__PURE__ */ jsxRuntime.jsx(
           StatusBar,
           {
